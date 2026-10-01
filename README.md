@@ -1,6 +1,6 @@
 # Survival Lab
 
-Survival Lab is a transparent paper-trading arena for comparing six rule-based strategy agents under one shared risk budget. The production dashboard is deployed at `https://trader.mcc0nnell.org`.
+Survival Lab is a transparent paper-trading arena for comparing strategy cartridges through one shared risk, execution, and evidence boundary. The production dashboard is deployed at `https://trader.mcc0nnell.org`.
 
 The default dashboard consumes public BTC-USD market data and performs **paper execution only**. It has no exchange credentials, no deposit path, no withdrawal path, and no live-order adapter.
 
@@ -15,14 +15,20 @@ A live-feed failure does not silently fall back to synthetic prices. Live mode u
 
 ```
 market observation
-  -> six agents
-  -> consensus intent
+  -> strategy cartridge
+       observe()
+       target() -> normalized target exposure / portfolio weights
+       explain()
   -> risk gate
-  -> paper executor
+  -> executor
   -> evidence log
 ```
 
-Agents never receive execution authority. The risk gate enforces stale-quote rejection, one position at a time, maximum exposure and notional, order-rate limits, drawdown halt, and cumulative-loss halt. Paper fills include observed spread, configurable slippage, and fees. To prevent transaction-cost churn, a consensus reversal cannot close a fresh position: the default gate requires a 30-second minimum hold, an opposite consensus magnitude of at least 0.30, and three consecutive confirmations. Take-profit, stop-loss, and kill-switch exits remain immediate. Consensus-flip exits are deliberately hysteretic: a position must be held for at least 30 seconds, opposite consensus must reach 0.30 magnitude, and it must persist for three consecutive strategy samples. Take-profit, stop-loss, and kill-switch exits bypass the anti-churn delay.
+Strategies never receive execution authority. Each cartridge declares its universe, sampling cadence, rebalance cadence, output type, and research identity, then emits a normalized target through the common contract. The risk gate enforces stale-quote rejection, one position at a time, maximum exposure and notional, order-rate limits, drawdown halt, and cumulative-loss halt. Paper fills include observed spread, configurable slippage, and fees. Consensus Six is the first active cartridge; its reversal exits require a 30-second minimum hold, opposite consensus magnitude of at least 0.30, and three consecutive confirmations. Take-profit, stop-loss, and kill-switch exits remain immediate.
+
+## Active cartridge
+
+`consensus-six` wraps the original six transparent agents behind the cartridge contract. The dashboard still renders their individual explanations, but the executor sees only the cartridge target.
 
 ## Agents
 
@@ -37,7 +43,7 @@ Agents never receive execution authority. The risk gate enforces stale-quote rej
 
 ## Evidence
 
-Every strategy-sampled market observation, consensus, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
+Every strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
 
 The browser retains a bounded local copy if remote ingestion is unavailable. The deployed evidence endpoint is `survival-lab-evidence.stokoe.workers.dev/api/events`; its Neon connection is a Cloudflare Worker secret, so database credentials never enter the browser.
 

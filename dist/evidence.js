@@ -11,6 +11,7 @@ const KIND_BY_TYPE=Object.freeze({
   "run.started":"run_start",
   "run.ended":"run_end",
   "agent.consensus":"decision",
+  "strategy.target":"decision",
   "risk.decision":"decision",
   "execution.fill":"trade",
   "market.observation":"system",

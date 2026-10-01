@@ -1,4 +1,5 @@
-import {DEFAULT_CONFIG,AGENTS,createAccount,computeSignals,consensus,markAccount,riskDecision,openPaper,closePaper,evaluateExit,enforceKillSwitch} from "./core.js";
+import {DEFAULT_CONFIG,AGENTS,createAccount,markAccount,riskDecision,openPaper,closePaper,evaluateExit,enforceKillSwitch} from "./core.js";
+import {createStrategy} from "./strategies.js";
 import {CoinbaseFeed,SyntheticFeed} from "./feed.js";
 import {EvidenceLog} from "./evidence.js";
 
@@ -7,7 +8,7 @@ const feedMode=new URLSearchParams(location.search).get("feed")==="synthetic"?"s
 const evidenceEndpoint=document.querySelector('meta[name="survival-evidence-endpoint"]')?.content||null;
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategyTimer,syntheticTimer,rafId,started,speed=1,nextStrategyAt=0;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,rafId,started,speed=1,nextStrategyAt=0;
 
 function newState(){
   return {
@@ -47,12 +48,12 @@ function onFeedStatus(status,detail){
 async function boot(){
   clearTimeout(strategyTimer);clearTimeout(syntheticTimer);cancelAnimationFrame(rafId);
   try{feed?.close?.()}catch{} if(log)log.close();
-  feed=makeFeed();log=new EvidenceLog({endpoint:evidenceEndpoint});state=newState();started=Date.now();
+  feed=makeFeed();log=new EvidenceLog({endpoint:evidenceEndpoint});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
   el("feed").innerHTML="";document.querySelector(".mode").textContent=feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
   el("shock").disabled=feedMode==="live";el("shock").title=feedMode==="live"?"Shock injection is available only in deterministic synthetic mode.":"";
   el("speed").disabled=feedMode==="live";el("speed").textContent=feedMode==="live"?"STREAMING":"1× SPEED";
   addEvent("sys","SYSTEM",feedMode==="live"?"Opening Coinbase BTC-USD WebSocket":"Deterministic arena initialized");
-  await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD",market_transport:feedMode==="live"?"coinbase-websocket":"synthetic"},0);
+  await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD",market_transport:feedMode==="live"?"coinbase-websocket":"synthetic",strategy:strategy.manifest},0);
   if(feedMode==="live"){
     feed.start(acceptVisualQuote,onFeedStatus);
     nextStrategyAt=performance.now()+STRATEGY_MS;
@@ -109,14 +110,21 @@ async function processSnapshot(quote){
   state.history.push(observation);if(state.history.length>90)state.history.shift();
   await log.append("market.observation",observation,state.tick);
   markAccount(state.account,observation);
-  const signals=computeSignals(state.history,observation),vote=consensus(signals);
-  state.signals=signals;
+
+  strategy.observe(observation);
+  const target=strategy.target();
+  state.signals=target.explanation?.signals||[];
+
   const now=Date.now();
-  let exit=evaluateExit(state.account,observation,vote.score,now);
+  let exit=evaluateExit(state.account,observation,target.score,now);
   const position=state.account.position;
-  await log.append("agent.consensus",{
-    score:vote.score,leader:vote.leader.name,
-    signals:signals.map(x=>({id:x.id,raw:x.raw,vote:x.vote})),
+  await log.append("strategy.target",{
+    strategy_id:target.strategy_id,
+    exposure:target.exposure,
+    confidence:target.confidence,
+    leader:target.leader,
+    rationale:target.rationale,
+    explanation:target.explanation,
     exit_gate:position?{
       age_ms:Math.max(0,now-position.openedAt),
       flip_confirmations:position.flipConfirmations||0,
@@ -125,22 +133,29 @@ async function processSnapshot(quote){
       min_hold_ms:DEFAULT_CONFIG.minHoldMs
     }:null
   },state.tick);
+
   const killed=enforceKillSwitch(state.account);
   if(killed&&state.account.position)exit="kill switch: "+killed;
   if(exit){
     const fill=closePaper(state.account,observation,exit,now);
     addEvent(fill.net>=0?"buy":"sell","CLOSED",exit+" · "+(fill.net>=0?"+":"")+"$"+fill.net.toFixed(4));
-    await log.append("execution.fill",{kind:"close",...fill,equity:state.account.equity},state.tick);
+    await log.append("execution.fill",{kind:"close",strategy_id:target.strategy_id,...fill,equity:state.account.equity},state.tick);
   }else if(!state.account.position){
-    const intent={score:vote.score,leader:vote.leader.name};
+    const intent={
+      strategy_id:target.strategy_id,
+      score:target.score,
+      target_exposure:target.exposure,
+      confidence:target.confidence,
+      leader:target.leader
+    };
     const risk=riskDecision(state.account,observation,intent,now);
     if(risk.halt){state.account.halted=true;state.account.haltReason=risk.reason}
     await log.append("risk.decision",{intent,...risk},state.tick);
     if(risk.allowed){
       const fill=openPaper(state.account,observation,intent,risk,now);
-      addEvent(fill.side==="BUY"?"buy":"sell",vote.leader.name,(fill.side==="BUY"?"LONG":"SHORT")+" · $"+fill.notional.toFixed(2)+" notional");
-      await log.append("execution.fill",{kind:"open",...fill,score:vote.score},state.tick);
-    }else if(state.tick%5===0)addEvent("hold",vote.leader.name,"HOLD · "+risk.reason);
+      addEvent(fill.side==="BUY"?"buy":"sell",target.leader,(fill.side==="BUY"?"LONG":"SHORT")+" · $"+fill.notional.toFixed(2)+" notional");
+      await log.append("execution.fill",{kind:"open",strategy_id:target.strategy_id,...fill,score:target.score,target_exposure:target.exposure},state.tick);
+    }else if(state.tick%5===0)addEvent("hold",target.leader,"HOLD · "+risk.reason);
   }
   markAccount(state.account,observation);enforceKillSwitch(state.account);
   state.equities.push(state.account.equity);if(state.equities.length>90)state.equities.shift();
