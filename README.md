@@ -1,6 +1,6 @@
 # Survival Lab
 
-Survival Lab is a transparent paper-trading arena for comparing six rule-based strategy agents under one shared risk budget.
+Survival Lab is a transparent paper-trading arena for comparing six rule-based strategy agents under one shared risk budget. The production dashboard is deployed at `https://trader.mcc0nnell.org`.
 
 The default dashboard consumes public BTC-USD market data and performs **paper execution only**. It has no exchange credentials, no deposit path, no withdrawal path, and no live-order adapter.
 
@@ -52,6 +52,15 @@ npm run smoke:live
 ```
 
 Open <http://localhost:8080>. Add `?feed=synthetic` for deterministic mode.
+
+## Deployment
+
+```bash
+npm run deploy:trader
+npm run deploy:evidence
+```
+
+The production frontend is a Cloudflare Worker static-assets deployment on `trader.mcc0nnell.org`. The evidence Worker accepts browser writes only from that origin and persists them to the existing Neon `survival_lab` database.
 
 ## Scope
 
