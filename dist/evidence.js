@@ -15,6 +15,7 @@ const KIND_BY_TYPE=Object.freeze({
   "risk.decision":"decision",
   "execution.fill":"trade",
   "market.observation":"system",
+  "history.snapshot":"system",
   "feed.error":"system",
   "control":"control",
   "hold":"hold"

@@ -41,13 +41,24 @@ Strategies never receive execution authority. Each cartridge declares its univer
 | DUSKA | Observed order flow |
 | NOVIA | Top-of-book liquidity imbalance |
 
+## Historical data plane
+
+Strategy cartridges declare machine-readable history contracts. The browser asks the evidence Worker for normalized datasets; the Worker reads/writes the Neon `market_history` cache and owns vendor-specific adapters.
+
+Current datasets:
+
+- `btc-usd-spot-1d`: Kraken spot BTC/USD normalized to `BTC-USD`, daily OHLCV.
+- `kraken-pf-xbtusd-1d`: Kraken PF_XBTUSD perpetual-futures daily OHLCV.
+
+`tsmom-12m` consumes the futures dataset through a dedicated adapter. The adapter forms month-end futures returns and estimates ex-ante annualized volatility from exponentially weighted daily returns with a 60-day center of mass before passing 12 monthly observations to the cartridge. It is a replay/research contestant; Consensus Six remains the live paper executor.
+
 ## Evidence
 
 Every strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
 
 The browser retains a bounded local copy if remote ingestion is unavailable. The evidence Worker exposes a sanitized read-only `/api/ledger` view for the dashboard, so recent run summaries and strategy/evidence events are visible on Trader without exposing database credentials or arbitrary SQL. The Neon connection remains a Cloudflare Worker secret.
 
-`schema.sql` defines the Neon event store. `worker/` contains the server-side ingestion boundary. It accepts bounded evidence batches and de-duplicates them by `(run_id, seq)`.
+`schema.sql` defines both the Neon event store and the normalized `market_history` cache. `worker/` contains the server-side ingestion/read boundary. It accepts bounded evidence batches, de-duplicates them by `(run_id, sequence)`, exposes the sanitized ledger, and hydrates allowlisted daily history datasets into Neon.
 
 ## Run and test
 

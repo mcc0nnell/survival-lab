@@ -1,5 +1,6 @@
 import {DEFAULT_CONFIG,AGENTS,createAccount,markAccount,riskDecision,openPaper,closePaper,evaluateExit,enforceKillSwitch} from "./core.js";
-import {createStrategy} from "./strategies.js";
+import {createStrategy,STRATEGY_REGISTRY} from "./strategies.js";
+import {HistoryPlane,compatibility,bootstrapStrategy} from "./history.js";
 import {CoinbaseFeed,SyntheticFeed} from "./feed.js";
 import {EvidenceLog} from "./evidence.js";
 
@@ -7,9 +8,12 @@ const el=id=>document.getElementById(id);
 const feedMode=new URLSearchParams(location.search).get("feed")==="synthetic"?"synthetic":"live";
 const evidenceEndpoint=document.querySelector('meta[name="survival-evidence-endpoint"]')?.content||null;
 const ledgerEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/ledger")||null;
+const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history")||null;
+const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null;
+const strategyPreviews=new Map();
 
 function newState(){
   return {
@@ -42,6 +46,61 @@ async function refreshLedger(){
   }finally{
     ledgerTimer=setTimeout(refreshLedger,5000);
   }
+}
+
+function renderStrategyCatalog(){
+  const cards=Object.values(STRATEGY_REGISTRY).map(entry=>{
+    const m=entry.manifest;
+    let stateLabel=m.status==="research"?"RESEARCH":m.status==="replay"?"REPLAY":m.status==="active"?"ACTIVE":"READY";
+    let reason=m.note||"";
+    if(m.history_contract){
+      const c=compatibility(m,historyPlane);
+      if(c.state==="BLOCKED"){stateLabel="BLOCKED";reason=c.reason}
+      else if(m.status!=="replay"){stateLabel=c.state;reason=c.reason}
+    }
+    const preview=strategyPreviews.get(m.id);
+    if(preview){
+      const sign=preview.exposure>=0?"+":"";
+      reason="TARGET "+sign+preview.exposure.toFixed(3)+" · "+preview.rationale;
+    }
+    const cadence=m.sampling||"—",lookback=m.lookback||"—";
+    const cls=stateLabel.toLowerCase();
+    return '<article class="cartridge"><div class="cartridgeTop"><div class="cartridgeName">'+m.name+
+      '</div><div class="cartridgeState '+cls+'">'+stateLabel+'</div></div>'+
+      '<div class="cartridgeMeta">'+m.id+' · '+cadence+'<br>'+lookback+
+      (reason?'<br>'+reason:'')+'</div></article>';
+  });
+  el("strategyCatalog").innerHTML=cards.join("");
+}
+async function recordHistorySnapshot(dataset){
+  await log?.append("history.snapshot",{
+    dataset_id:dataset.id,provider:dataset.provider,product:dataset.product,
+    cadence:dataset.cadence,count:dataset.count,
+    coverage_start:dataset.coverage_start,coverage_end:dataset.coverage_end
+  },state?.tick||0).catch(()=>{});
+}
+async function loadHistoryPlane(){
+  renderStrategyCatalog();
+  if(!historyEndpoint){el("historyState").textContent="HISTORY · UNAVAILABLE";return}
+  try{
+    [historyDataset,futuresDataset]=await Promise.all([
+      historyPlane.load("btc-usd-spot-1d",{days:430}),
+      historyPlane.load("kraken-pf-xbtusd-1d",{days:430})
+    ]);
+    strategyPreviews.clear();
+    for(const entry of Object.values(STRATEGY_REGISTRY)){
+      if(!entry.create||!entry.manifest.history_contract)continue;
+      const preview=entry.create();
+      const boot=bootstrapStrategy(preview,historyPlane);
+      if(boot.ready&&boot.target)strategyPreviews.set(entry.manifest.id,boot.target);
+    }
+    el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" · FUTURES "+futuresDataset.count+" · THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
+    await Promise.all([recordHistorySnapshot(historyDataset),recordHistorySnapshot(futuresDataset)]);
+  }catch(e){
+    el("historyState").textContent="HISTORY · ERROR";
+    addEvent("sell","HISTORY",e.message);
+  }
+  renderStrategyCatalog();
 }
 
 function addEvent(kind,who,msg){
@@ -85,7 +144,7 @@ async function boot(){
   }else{
     syntheticTimer=setTimeout(syntheticPulse,20);
   }
-  renderSlow();refreshLedger();rafId=requestAnimationFrame(frame);
+  renderSlow();refreshLedger();loadHistoryPlane();rafId=requestAnimationFrame(frame);
 }
 async function strategyPulse(){
   if(feedMode!=="live")return;

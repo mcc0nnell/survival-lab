@@ -29,13 +29,14 @@ export function createConsensusSix(){
 
 export const TSMOM_MANIFEST=validateManifest({
   id:"tsmom-12m",name:"Time-Series Momentum 12M",version:"1.0.0",
-  universe:["futures / instrument with monthly excess returns"],
-  sampling:"monthly",lookback:"12 monthly excess returns",
+  universe:["PF_XBTUSD perpetual futures"],
+  sampling:"monthly signal from daily futures history",lookback:"12 monthly futures returns + daily volatility history",
   rebalance:"monthly",output:"target_exposure",
   research:["Moskowitz, Ooi & Pedersen (2012), Time Series Momentum"],
   status:"replay",
+  history_contract:{dataset_id:"kraken-pf-xbtusd-1d",kind:"ohlcv",price_type:"perpetual_futures",cadence:"1d",min_observations:365,adapter:"tsmom-12m-v1"},
   data_contract:["excessReturn","exAnteVol"],
-  note:"Direction follows the sign of trailing 12-month excess return. Requested risk scale is 40% / ex-ante volatility; common risk controls cap executable exposure."
+  note:"Applies the paper's 12-month own-return sign and 40% / ex-ante-volatility rule to Kraken PF_XBTUSD. The current instrument is an experimental application, not part of the paper's original 58-instrument sample."
 });
 
 export function createTimeSeriesMomentum(){
