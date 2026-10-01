@@ -1,14 +1,15 @@
-CREATE TABLE IF NOT EXISTS survival_events (
+CREATE TABLE IF NOT EXISTS public.survival_events (
   run_id uuid NOT NULL,
-  seq bigint NOT NULL CHECK (seq > 0),
-  ts timestamptz NOT NULL,
-  event_type text NOT NULL,
-  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  prev_hash char(64) NOT NULL,
-  event_hash char(64) NOT NULL,
+  sequence integer NOT NULL CHECK (sequence >= 0),
+  tick integer NOT NULL CHECK (tick >= 0),
+  kind text NOT NULL CHECK (
+    kind IN ('run_start','run_end','decision','trade','hold','control','system')
+  ),
+  occurred_at timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (run_id, seq)
+  payload jsonb NOT NULL,
+  PRIMARY KEY (run_id, sequence)
 );
 
-CREATE INDEX IF NOT EXISTS survival_events_type_ts_idx
-  ON survival_events (event_type, ts DESC);
+CREATE INDEX IF NOT EXISTS survival_events_received
+  ON public.survival_events (received_at DESC);

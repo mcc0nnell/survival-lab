@@ -4,6 +4,7 @@ import {
   DEFAULT_CONFIG, createAccount, computeSignals, consensus,
   markAccount, riskDecision, openPaper, closePaper, enforceKillSwitch
 } from "../dist/core.js";
+import { EvidenceLog } from "../dist/evidence.js";
 
 const quote=(bid=100,ask=100.02,extra={})=>({
   bid, ask, last:(bid+ask)/2, bidSize:2, askSize:1,
@@ -68,4 +69,18 @@ test("mark-to-market does not invent realized pnl",()=>{
   markAccount(a,quote(102,102.02,{receivedAt:now+1000}));
   assert.ok(a.equity>a.cash);
   assert.equal(a.realized,realized);
+});
+
+test("evidence records match Neon shape and verify their hash chain",async()=>{
+  const log=new EvidenceLog();
+  const first=await log.append("run.started",{mode:"synthetic"},0);
+  const second=await log.append("agent.consensus",{score:.2},1);
+  log.close();
+  assert.equal(first.kind,"run_start");
+  assert.equal(second.kind,"decision");
+  assert.equal(first.sequence,1);
+  assert.equal(second.tick,1);
+  assert.equal(first.payload.event_type,"run.started");
+  assert.equal(first.payload.evidence.prev_hash,"0".repeat(64));
+  assert.equal(await log.verify([first,second]),true);
 });

@@ -23,7 +23,7 @@ async function boot(){
   el("shock").disabled=feedMode==="live";el("shock").title=feedMode==="live"?"Shock injection is available only in deterministic synthetic mode.":"";
   el("speed").disabled=feedMode==="live";el("speed").textContent=feedMode==="live"?"REAL TIME":"1× SPEED";
   addEvent("sys","SYSTEM",feedMode==="live"?"Connecting to public BTC-USD market data":"Deterministic arena initialized");
-  await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD"});
+  await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD"},0);
   render();schedule(20);
 }
 function schedule(ms){clearTimeout(timer);timer=setTimeout(loop,ms)}
@@ -36,34 +36,34 @@ async function loop(){
   }catch(e){
     state.feedErrors++;state.feedState="STALE";
     addEvent("sell","FEED","Market data error · "+e.message);
-    await log.append("feed.error",{message:e.message,count:state.feedErrors});
+    await log.append("feed.error",{message:e.message,count:state.feedErrors},state.tick);
   }
   render();schedule(feedMode==="synthetic"?900:2000);
 }
 async function step(){
   const quote=await feed.next();state.quote=quote;state.tick++;
   state.history.push(quote);if(state.history.length>90)state.history.shift();
-  await log.append("market.observation",quote);
+  await log.append("market.observation",quote,state.tick);
   markAccount(state.account,quote);
   const signals=computeSignals(state.history,quote), vote=consensus(signals);
   state.signals=signals;
-  await log.append("agent.consensus",{score:vote.score,leader:vote.leader.name,signals:signals.map(x=>({id:x.id,raw:x.raw,vote:x.vote}))});
+  await log.append("agent.consensus",{score:vote.score,leader:vote.leader.name,signals:signals.map(x=>({id:x.id,raw:x.raw,vote:x.vote}))},state.tick);
   let exit=evaluateExit(state.account,quote,vote.score);
   const killed=enforceKillSwitch(state.account);
   if(killed&&state.account.position) exit="kill switch: "+killed;
   if(exit){
     const fill=closePaper(state.account,quote,exit,Date.now());
     addEvent(fill.net>=0?"buy":"sell","CLOSED",exit+" · "+(fill.net>=0?"+":"")+"$"+fill.net.toFixed(4));
-    await log.append("execution.fill",{kind:"close",...fill,equity:state.account.equity});
+    await log.append("execution.fill",{kind:"close",...fill,equity:state.account.equity},state.tick);
   }else if(!state.account.position){
     const intent={score:vote.score,leader:vote.leader.name};
     const risk=riskDecision(state.account,quote,intent,Date.now());
     if(risk.halt){state.account.halted=true;state.account.haltReason=risk.reason}
-    await log.append("risk.decision",{intent,...risk});
+    await log.append("risk.decision",{intent,...risk},state.tick);
     if(risk.allowed){
       const fill=openPaper(state.account,quote,intent,risk,Date.now());
       addEvent(fill.side==="BUY"?"buy":"sell",vote.leader.name,(fill.side==="BUY"?"LONG":"SHORT")+" · $"+fill.notional.toFixed(2)+" notional");
-      await log.append("execution.fill",{kind:"open",...fill,score:vote.score});
+      await log.append("execution.fill",{kind:"open",...fill,score:vote.score},state.tick);
     }else if(state.tick%5===0) addEvent("hold",vote.leader.name,"HOLD · "+risk.reason);
   }
   markAccount(state.account,quote);enforceKillSwitch(state.account);

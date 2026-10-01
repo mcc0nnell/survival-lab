@@ -39,7 +39,7 @@ Agents never receive execution authority. The risk gate enforces stale-quote rej
 
 Every market observation, consensus, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain.
 
-The browser retains a bounded local copy even if the remote evidence endpoint is unavailable. Remote ingestion is configured through the `survival-evidence-endpoint` meta value in `dist/index.html`; database credentials never belong in the browser.
+The browser retains a bounded local copy if remote ingestion is unavailable. The deployed evidence endpoint is `survival-lab-evidence.stokoe.workers.dev/api/events`; its Neon connection is a Cloudflare Worker secret, so database credentials never enter the browser.
 
 `schema.sql` defines the Neon event store. `worker/` contains the server-side ingestion boundary. It accepts bounded evidence batches and de-duplicates them by `(run_id, seq)`.
 
