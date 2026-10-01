@@ -1,6 +1,9 @@
 import { CoinbaseFeed } from "../dist/feed.js";
 
-const quote=await new CoinbaseFeed("BTC-USD").next();
+const feed=new CoinbaseFeed("BTC-USD");
+const quote=await feed.next();
+feed.close();
+
 if(!(quote.bid>0&&quote.ask>=quote.bid&&quote.last>0)){
   throw new Error("invalid live quote");
 }

@@ -9,7 +9,7 @@ The default dashboard consumes public BTC-USD market data and performs **paper e
 - Default: public Coinbase BTC-USD top-of-book plus latest trade observations.
 - `?feed=synthetic`: deterministic seeded tape for regression testing, replay, speed controls, and shock injection.
 
-A live-feed failure does not silently fall back to synthetic prices.
+A live-feed failure does not silently fall back to synthetic prices. Live mode uses the Coinbase Exchange WebSocket ticker. Market visuals update continuously from genuine ticker messages, while strategy/risk evaluation samples the latest quote at approximately 1 Hz.
 
 ## Authority boundary
 
@@ -37,7 +37,7 @@ Agents never receive execution authority. The risk gate enforces stale-quote rej
 
 ## Evidence
 
-Every market observation, consensus, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain.
+Every strategy-sampled market observation, consensus, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
 
 The browser retains a bounded local copy if remote ingestion is unavailable. The deployed evidence endpoint is `survival-lab-evidence.stokoe.workers.dev/api/events`; its Neon connection is a Cloudflare Worker secret, so database credentials never enter the browser.
 

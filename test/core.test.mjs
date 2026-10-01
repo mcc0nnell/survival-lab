@@ -5,6 +5,7 @@ import {
   markAccount, riskDecision, openPaper, closePaper, enforceKillSwitch
 } from "../dist/core.js";
 import { EvidenceLog } from "../dist/evidence.js";
+import { parseCoinbaseTicker } from "../dist/feed.js";
 
 const quote=(bid=100,ask=100.02,extra={})=>({
   bid, ask, last:(bid+ask)/2, bidSize:2, askSize:1,
@@ -83,4 +84,25 @@ test("evidence records match Neon shape and verify their hash chain",async()=>{
   assert.equal(first.payload.event_type,"run.started");
   assert.equal(first.payload.evidence.prev_hash,"0".repeat(64));
   assert.equal(await log.verify([first,second]),true);
+});
+
+test("Coinbase WebSocket ticker maps to the market observation contract",()=>{
+  const q=parseCoinbaseTicker({
+    type:"ticker",sequence:123,product_id:"BTC-USD",price:"83522.93",
+    best_bid:"83522.93",best_bid_size:"0.03267153",
+    best_ask:"83522.94",best_ask_size:"0.07509586",
+    side:"sell",time:"2026-10-01T01:45:39.318007Z",trade_id:1100740314
+  },42);
+  assert.equal(q.source,"COINBASE_WS");
+  assert.equal(q.bid,83522.93);
+  assert.equal(q.ask,83522.94);
+  assert.equal(q.bidSize,0.03267153);
+  assert.equal(q.askSize,0.07509586);
+  assert.equal(q.aggressor,1);
+  assert.equal(q.sequence,123);
+  assert.equal(q.receivedAt,42);
+});
+
+test("non-ticker WebSocket messages are ignored",()=>{
+  assert.equal(parseCoinbaseTicker({type:"subscriptions"}),null);
 });
