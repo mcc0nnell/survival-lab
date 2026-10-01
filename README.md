@@ -22,7 +22,7 @@ market observation
   -> evidence log
 ```
 
-Agents never receive execution authority. The risk gate enforces stale-quote rejection, one position at a time, maximum exposure and notional, order-rate limits, drawdown halt, and cumulative-loss halt. Paper fills include observed spread, configurable slippage, and fees.
+Agents never receive execution authority. The risk gate enforces stale-quote rejection, one position at a time, maximum exposure and notional, order-rate limits, drawdown halt, and cumulative-loss halt. Paper fills include observed spread, configurable slippage, and fees. Consensus-flip exits are deliberately hysteretic: a position must be held for at least 30 seconds, opposite consensus must reach 0.30 magnitude, and it must persist for three consecutive strategy samples. Take-profit, stop-loss, and kill-switch exits bypass the anti-churn delay.
 
 ## Agents
 

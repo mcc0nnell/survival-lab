@@ -1,7 +1,9 @@
 export const DEFAULT_CONFIG = Object.freeze({
   initialEquity: 20,
   entryThreshold: 0.13,
-  exitFlipThreshold: 0.15,
+  exitFlipThreshold: 0.30,
+  exitFlipConfirmations: 3,
+  minHoldMs: 30000,
   takeProfitPct: 0.012,
   stopLossPct: 0.008,
   maxExposurePct: 0.25,
@@ -115,7 +117,7 @@ export function openPaper(account, quote, intent, risk, now=Date.now(), cfg=DEFA
   const fee=risk.notional*cfg.feeBps/10000;
   account.cash-=fee;
   account.realized-=fee;
-  account.position={direction,qty,entryPrice:fill,entryNotional:risk.notional,entryFee:fee,openedAt:now};
+  account.position={direction,qty,entryPrice:fill,entryNotional:risk.notional,entryFee:fee,openedAt:now,flipConfirmations:0};
   account.lastOrderAt=now;
   account.trades++;
   markAccount(account,quote);
@@ -141,13 +143,26 @@ export function closePaper(account, quote, reason="exit", now=Date.now(), cfg=DE
   return {side,fill,qty:p.qty,gross,fee,net:net-p.entryFee,reason};
 }
 
-export function evaluateExit(account, quote, score, cfg=DEFAULT_CONFIG){
+export function evaluateExit(account, quote, score, now=Date.now(), cfg=DEFAULT_CONFIG){
   if(!account.position) return null;
   const p=account.position;
   const u=p.direction*(mid(quote)-p.entryPrice)/p.entryPrice;
-  if(Math.sign(score)!==p.direction&&Math.abs(score)>cfg.exitFlipThreshold) return "consensus flip";
+
+  // Price/risk exits always outrank anti-churn controls.
   if(u>=cfg.takeProfitPct) return "take profit";
   if(u<=-cfg.stopLossPct) return "risk stop";
+
+  const opposite=Math.sign(score)!==0&&Math.sign(score)!==p.direction;
+  const strongFlip=opposite&&Math.abs(score)>=cfg.exitFlipThreshold;
+  const heldMs=Math.max(0,now-p.openedAt);
+
+  if(heldMs<cfg.minHoldMs){
+    p.flipConfirmations=0;
+    return null;
+  }
+
+  p.flipConfirmations=strongFlip?(p.flipConfirmations||0)+1:0;
+  if(p.flipConfirmations>=cfg.exitFlipConfirmations) return "confirmed consensus flip";
   return null;
 }
 

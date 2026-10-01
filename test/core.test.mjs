@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_CONFIG, createAccount, computeSignals, consensus,
-  markAccount, riskDecision, openPaper, closePaper, enforceKillSwitch
+  markAccount, riskDecision, openPaper, closePaper, evaluateExit, enforceKillSwitch
 } from "../dist/core.js";
 import { EvidenceLog } from "../dist/evidence.js";
 import { parseCoinbaseTicker } from "../dist/feed.js";
@@ -121,4 +121,42 @@ test("evidence close uses a keepalive flush for queued rows",async()=>{
   }finally{
     globalThis.fetch=originalFetch;
   }
+});
+
+test("consensus flips require hold time, strength and persistence",()=>{
+  const cfg={...DEFAULT_CONFIG,minHoldMs:30000,exitFlipThreshold:.30,exitFlipConfirmations:3};
+  const a=createAccount(cfg),t=100000;
+  const q=quote(100,100.02,{receivedAt:t});
+  const risk=riskDecision(a,q,{score:.8},t,cfg);
+  openPaper(a,q,{score:.8},risk,t,cfg);
+
+  assert.equal(evaluateExit(a,q,-.9,t+5000,cfg),null,"minimum hold blocks early flip");
+  assert.equal(a.position.flipConfirmations,0);
+  assert.equal(evaluateExit(a,q,-.29,t+31000,cfg),null,"weak opposite consensus does not count");
+  assert.equal(a.position.flipConfirmations,0);
+  assert.equal(evaluateExit(a,q,-.31,t+32000,cfg),null);
+  assert.equal(a.position.flipConfirmations,1);
+  assert.equal(evaluateExit(a,q,-.45,t+33000,cfg),null);
+  assert.equal(a.position.flipConfirmations,2);
+  assert.equal(evaluateExit(a,q,-.50,t+34000,cfg),"confirmed consensus flip");
+});
+
+test("flip confirmation resets when opposite consensus does not persist",()=>{
+  const cfg={...DEFAULT_CONFIG,minHoldMs:0,exitFlipThreshold:.30,exitFlipConfirmations:3};
+  const a=createAccount(cfg),t=100000,q=quote(100,100.02,{receivedAt:t});
+  const risk=riskDecision(a,q,{score:.8},t,cfg);
+  openPaper(a,q,{score:.8},risk,t,cfg);
+  assert.equal(evaluateExit(a,q,-.5,t+1000,cfg),null);
+  assert.equal(a.position.flipConfirmations,1);
+  assert.equal(evaluateExit(a,q,.1,t+2000,cfg),null);
+  assert.equal(a.position.flipConfirmations,0);
+});
+
+test("risk stop bypasses anti-churn minimum hold",()=>{
+  const cfg={...DEFAULT_CONFIG,minHoldMs:30000,exitFlipThreshold:.30,exitFlipConfirmations:3};
+  const a=createAccount(cfg),t=100000,q=quote(100,100.02,{receivedAt:t});
+  const risk=riskDecision(a,q,{score:.8},t,cfg);
+  openPaper(a,q,{score:.8},risk,t,cfg);
+  const down=quote(98.9,98.92,{receivedAt:t+1000});
+  assert.equal(evaluateExit(a,down,.8,t+1000,cfg),"risk stop");
 });

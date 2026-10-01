@@ -111,21 +111,33 @@ async function processSnapshot(quote){
   markAccount(state.account,observation);
   const signals=computeSignals(state.history,observation),vote=consensus(signals);
   state.signals=signals;
-  await log.append("agent.consensus",{score:vote.score,leader:vote.leader.name,signals:signals.map(x=>({id:x.id,raw:x.raw,vote:x.vote}))},state.tick);
-  let exit=evaluateExit(state.account,observation,vote.score);
+  const now=Date.now();
+  let exit=evaluateExit(state.account,observation,vote.score,now);
+  const position=state.account.position;
+  await log.append("agent.consensus",{
+    score:vote.score,leader:vote.leader.name,
+    signals:signals.map(x=>({id:x.id,raw:x.raw,vote:x.vote})),
+    exit_gate:position?{
+      age_ms:Math.max(0,now-position.openedAt),
+      flip_confirmations:position.flipConfirmations||0,
+      required_confirmations:DEFAULT_CONFIG.exitFlipConfirmations,
+      flip_threshold:DEFAULT_CONFIG.exitFlipThreshold,
+      min_hold_ms:DEFAULT_CONFIG.minHoldMs
+    }:null
+  },state.tick);
   const killed=enforceKillSwitch(state.account);
   if(killed&&state.account.position)exit="kill switch: "+killed;
   if(exit){
-    const fill=closePaper(state.account,observation,exit,Date.now());
+    const fill=closePaper(state.account,observation,exit,now);
     addEvent(fill.net>=0?"buy":"sell","CLOSED",exit+" · "+(fill.net>=0?"+":"")+"$"+fill.net.toFixed(4));
     await log.append("execution.fill",{kind:"close",...fill,equity:state.account.equity},state.tick);
   }else if(!state.account.position){
     const intent={score:vote.score,leader:vote.leader.name};
-    const risk=riskDecision(state.account,observation,intent,Date.now());
+    const risk=riskDecision(state.account,observation,intent,now);
     if(risk.halt){state.account.halted=true;state.account.haltReason=risk.reason}
     await log.append("risk.decision",{intent,...risk},state.tick);
     if(risk.allowed){
-      const fill=openPaper(state.account,observation,intent,risk,Date.now());
+      const fill=openPaper(state.account,observation,intent,risk,now);
       addEvent(fill.side==="BUY"?"buy":"sell",vote.leader.name,(fill.side==="BUY"?"LONG":"SHORT")+" · $"+fill.notional.toFixed(2)+" notional");
       await log.append("execution.fill",{kind:"open",...fill,score:vote.score},state.tick);
     }else if(state.tick%5===0)addEvent("hold",vote.leader.name,"HOLD · "+risk.reason);
