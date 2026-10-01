@@ -21,7 +21,7 @@ const KIND_BY_TYPE=Object.freeze({
 export class EvidenceLog{
   constructor({endpoint=null,maxLocal=500}={}){
     this.endpoint=endpoint;this.maxLocal=maxLocal;this.runId=crypto.randomUUID();
-    this.sequence=0;this.prevHash="0".repeat(64);this.queue=[];this.remoteState=endpoint?"pending":"local";
+    this.sequence=0;this.prevHash="0".repeat(64);this.queue=[];this.remoteState=endpoint?"pending":"local";this.flushing=null;
     this.timer=setInterval(()=>this.flush().catch(()=>{}),5000);
   }
   async append(type,payload={},tick=0){
@@ -45,14 +45,25 @@ export class EvidenceLog{
       localStorage.setItem(key,JSON.stringify(arr));
     }catch{}
   }
-  async flush(){
-    if(!this.endpoint||!this.queue.length) return false;
+  async flush({keepalive=false,force=false}={}){
+    if(!this.endpoint||!this.queue.length)return false;
+    if(this.flushing&&!force)return this.flushing;
     const batch=this.queue.slice(0,50);
-    try{
-      const r=await fetch(this.endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({records:batch})});
-      if(!r.ok) throw new Error("evidence HTTP "+r.status);
-      this.queue.splice(0,batch.length);this.remoteState="synced";return true;
-    }catch(e){this.remoteState="offline";throw e;}
+    const sent=new Set(batch.map(r=>r.run_id+":"+r.sequence));
+    const request=(async()=>{
+      try{
+        const r=await fetch(this.endpoint,{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({records:batch}),keepalive});
+        if(!r.ok)throw new Error("evidence HTTP "+r.status);
+        this.queue=this.queue.filter(r=>!sent.has(r.run_id+":"+r.sequence));
+        this.remoteState="synced";return true;
+      }catch(e){this.remoteState="offline";throw e;}
+    })();
+    if(!force){
+      this.flushing=request;
+      try{return await request}finally{if(this.flushing===request)this.flushing=null}
+    }
+    return request;
   }
   async verify(records){
     let prev="0".repeat(64);
@@ -66,5 +77,5 @@ export class EvidenceLog{
     }
     return true;
   }
-  close(){clearInterval(this.timer);}
+  close(){clearInterval(this.timer);this.flush({keepalive:true,force:true}).catch(()=>{});}
 }

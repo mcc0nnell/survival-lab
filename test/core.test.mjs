@@ -106,3 +106,19 @@ test("Coinbase WebSocket ticker maps to the market observation contract",()=>{
 test("non-ticker WebSocket messages are ignored",()=>{
   assert.equal(parseCoinbaseTicker({type:"subscriptions"}),null);
 });
+
+test("evidence close uses a keepalive flush for queued rows",async()=>{
+  const originalFetch=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async(_url,options)=>{calls.push(options);return {ok:true}};
+  try{
+    const log=new EvidenceLog({endpoint:"https://example.invalid/api/events"});
+    await log.append("run.started",{mode:"test"},0);
+    log.close();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].keepalive,true);
+  }finally{
+    globalThis.fetch=originalFetch;
+  }
+});
