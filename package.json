@@ -1,0 +1,9 @@
+{
+  "name": "survival-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "smoke:live": "node scripts/live-smoke.mjs"
+  }
+}

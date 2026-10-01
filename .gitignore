@@ -1,1 +1,6 @@
 survival-lab-site.tar.gz
+node_modules/
+worker/node_modules/
+worker/wrangler.toml
+.dev.vars
+.env

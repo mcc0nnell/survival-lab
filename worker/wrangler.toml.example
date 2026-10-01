@@ -1,0 +1,6 @@
+name = "survival-lab-evidence"
+main = "src/index.js"
+compatibility_date = "2026-09-30"
+
+[vars]
+EVIDENCE_ALLOWED_ORIGIN = "https://survival-lab.mcc0nnell.chatgpt.site"

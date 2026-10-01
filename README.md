@@ -1,19 +1,28 @@
 # Survival Lab
 
-A deterministic, replayable arena for testing how multiple strategy agents behave under a shared survival constraint.
+Survival Lab is a transparent paper-trading arena for comparing six rule-based strategy agents under one shared risk budget.
 
-**Live demo:** [survival-lab.mcc0nnell.chatgpt.site](https://survival-lab.mcc0nnell.chatgpt.site)
+The default dashboard consumes public BTC-USD market data and performs **paper execution only**. It has no exchange credentials, no deposit path, no withdrawal path, and no live-order adapter.
 
-Survival Lab keeps the compelling part of autonomous-trading experiments—the competing strategies, live tape, and risk pressure—while making the evidence inspectable. It is a paper simulation. It connects to no exchange, holds no funds, and has no withdrawal keys.
+## Modes
 
-## What it does
+- Default: public Coinbase BTC-USD top-of-book plus latest trade observations.
+- `?feed=synthetic`: deterministic seeded tape for regression testing, replay, speed controls, and shock injection.
 
-- Runs six rule-based agents against the same synthetic market tape.
-- Shows every agent's vote, confidence, and current rationale.
-- Opens a paper position only when the combined vote crosses a threshold.
-- Tracks equity, realized P&L, drawdown, exposure, win rate, and runway.
-- Replays the same path from seed `0xA11CE` after every reset.
-- Supports deliberate, visibly labeled shock injection.
+A live-feed failure does not silently fall back to synthetic prices.
+
+## Authority boundary
+
+```
+market observation
+  -> six agents
+  -> consensus intent
+  -> risk gate
+  -> paper executor
+  -> evidence log
+```
+
+Agents never receive execution authority. The risk gate enforces stale-quote rejection, one position at a time, maximum exposure and notional, order-rate limits, drawdown halt, and cumulative-loss halt. Paper fills include observed spread, configurable slippage, and fees.
 
 ## Agents
 
@@ -21,45 +30,31 @@ Survival Lab keeps the compelling part of autonomous-trading experiments—the c
 | --- | --- |
 | KESTO | Trend |
 | ORVEN | Mean reversion |
-| BRAVA | Breakouts |
+| BRAVA | Breakout |
 | MIRAX | Volatility |
-| DUSKA | Funding pressure |
-| NOVIA | Liquidity |
+| DUSKA | Observed order flow |
+| NOVIA | Top-of-book liquidity imbalance |
 
-The current agents are deliberately legible rules, not language-model theater. Their purpose is to make orchestration, disagreement, and failure visible before more sophisticated models or real event cartridges are introduced.
+## Evidence
 
-## Run locally
+Every market observation, consensus, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain.
 
-No build step or dependencies are required.
+The browser retains a bounded local copy even if the remote evidence endpoint is unavailable. Remote ingestion is configured through the `survival-evidence-endpoint` meta value in `dist/index.html`; database credentials never belong in the browser.
+
+`schema.sql` defines the Neon event store. `worker/` contains the server-side ingestion boundary. It accepts bounded evidence batches and de-duplicates them by `(run_id, seq)`.
+
+## Run and test
 
 ```bash
 python3 -m http.server 8080 --directory dist
+npm test
+npm run smoke:live
 ```
 
-Then open <http://localhost:8080>.
+Open <http://localhost:8080>. Add `?feed=synthetic` for deterministic mode.
 
-## Architecture
+## Scope
 
-The prototype is a single static application in [`dist/index.html`](dist/index.html). It contains:
-
-- a seeded synthetic market generator;
-- six independent signal functions;
-- a consensus execution rule;
-- paper position and risk accounting;
-- a Canvas equity/market renderer; and
-- a DOM-native decision tape and agent ledger.
-
-The intended integration boundary is event cartridges:
-
-- **Secretariat** can provide racing events.
-- **Fire Producer** can provide live sports, news, and weather events.
-- **WindAnvil** can provide replay, provenance, and audit records.
-- **Survival Lab** remains the visible competition and evaluation surface.
-
-## Safety and scope
-
-This repository is an evaluation interface and simulation, not financial software or investment advice. The displayed prices, fills, returns, and order-book depth are synthetic.
-
-## License
+This is experimental evaluation software, not a broker. A future broker adapter belongs below the same risk gate and should consume explicit authorized intents rather than agent output directly.
 
 Apache-2.0
