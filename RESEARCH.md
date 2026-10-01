@@ -15,7 +15,7 @@ The Google Drive `Summaries` research corpus contains dedicated collections for 
 
 These require their own data contracts and horizons rather than being forced onto the 1 Hz BTC tape:
 
-- time-series momentum
+- time-series momentum — **promoted to `tsmom-12m` replay cartridge** using the archive's 12-month own-excess-return sign and `40% / ex-ante volatility` requested risk scale; live selection remains disabled until a matching monthly-history feed is present
 - short-term residual reversal
 - pairs/statistical arbitrage
 - cross-sectional momentum

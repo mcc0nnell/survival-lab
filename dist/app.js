@@ -6,9 +6,10 @@ import {EvidenceLog} from "./evidence.js";
 const el=id=>document.getElementById(id);
 const feedMode=new URLSearchParams(location.search).get("feed")==="synthetic"?"synthetic":"live";
 const evidenceEndpoint=document.querySelector('meta[name="survival-evidence-endpoint"]')?.content||null;
+const ledgerEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/ledger")||null;
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,rafId,started,speed=1,nextStrategyAt=0;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0;
 
 function newState(){
   return {
@@ -20,6 +21,29 @@ function newState(){
   };
 }
 function makeFeed(){return feedMode==="synthetic"?new SyntheticFeed():new CoinbaseFeed("BTC-USD")}
+function shortRun(id){return id?String(id).slice(0,8):"—"}
+function fmtNet(v){const n=Number(v);return Number.isFinite(n)?(n>=0?"+":"")+"$"+n.toFixed(4):"—"}
+async function refreshLedger(){
+  if(!ledgerEndpoint)return;
+  try{
+    const res=await fetch(ledgerEndpoint,{cache:"no-store"});
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    const data=await res.json();
+    const runs=(data.runs||[]).slice(0,8);
+    const events=(data.events||[]).slice(0,12);
+    el("neonRuns").innerHTML='<div class="neonRow"><b>RUN</b><b>STRATEGY</b><b>TICKS</b><b>FILLS</b><b>NET</b></div>'+
+      runs.map(r=>'<div class="neonRow"><b title="'+r.run_id+'">'+shortRun(r.run_id)+'</b><span>'+String(r.strategy_id||"legacy")+'</span><span>'+r.ticks+'</span><span>'+r.fills+'</span><span>'+fmtNet(r.realized_net)+'</span></div>').join("");
+    el("neonEvents").innerHTML='<div class="neonRow"><b>TICK</b><b>EVENT</b><b>STRATEGY</b><b>VALUE</b></div>'+
+      events.map(e=>{const value=e.event_type==="strategy.target"&&e.exposure!=null?Number(e.exposure).toFixed(3):e.event_type==="execution.fill"?(e.fill_kind||"fill")+" "+(e.side||"")+" "+fmtNet(e.net):"";
+        return '<div class="neonRow"><b>#'+String(e.tick).padStart(3,"0")+'</b><span>'+String(e.event_type||"")+'</span><span>'+String(e.strategy_id||"—")+'</span><span>'+value+'</span></div>'}).join("");
+    el("neonState").textContent="NEON · "+runs.length+" RUNS · "+new Date(data.generated_at).toLocaleTimeString();
+  }catch(e){
+    el("neonState").textContent="NEON UNAVAILABLE";
+  }finally{
+    ledgerTimer=setTimeout(refreshLedger,5000);
+  }
+}
+
 function addEvent(kind,who,msg){
   const sec=Math.floor((Date.now()-started)/1000),m=String(Math.floor(sec/60)).padStart(2,"0"),s=String(sec%60).padStart(2,"0");
   state.events.unshift({kind,who,msg,time:"["+m+":"+s+"]"});state.events=state.events.slice(0,100);state.slowDirty=true;
@@ -46,7 +70,7 @@ function onFeedStatus(status,detail){
   }
 }
 async function boot(){
-  clearTimeout(strategyTimer);clearTimeout(syntheticTimer);cancelAnimationFrame(rafId);
+  clearTimeout(strategyTimer);clearTimeout(syntheticTimer);clearTimeout(ledgerTimer);cancelAnimationFrame(rafId);
   try{feed?.close?.()}catch{} if(log)log.close();
   feed=makeFeed();log=new EvidenceLog({endpoint:evidenceEndpoint});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
   el("feed").innerHTML="";document.querySelector(".mode").textContent=feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
@@ -61,7 +85,7 @@ async function boot(){
   }else{
     syntheticTimer=setTimeout(syntheticPulse,20);
   }
-  renderSlow();rafId=requestAnimationFrame(frame);
+  renderSlow();refreshLedger();rafId=requestAnimationFrame(frame);
 }
 async function strategyPulse(){
   if(feedMode!=="live")return;

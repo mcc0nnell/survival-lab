@@ -45,7 +45,7 @@ Strategies never receive execution authority. Each cartridge declares its univer
 
 Every strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
 
-The browser retains a bounded local copy if remote ingestion is unavailable. The deployed evidence endpoint is `survival-lab-evidence.stokoe.workers.dev/api/events`; its Neon connection is a Cloudflare Worker secret, so database credentials never enter the browser.
+The browser retains a bounded local copy if remote ingestion is unavailable. The evidence Worker exposes a sanitized read-only `/api/ledger` view for the dashboard, so recent run summaries and strategy/evidence events are visible on Trader without exposing database credentials or arbitrary SQL. The Neon connection remains a Cloudflare Worker secret.
 
 `schema.sql` defines the Neon event store. `worker/` contains the server-side ingestion boundary. It accepts bounded evidence batches and de-duplicates them by `(run_id, seq)`.
 
