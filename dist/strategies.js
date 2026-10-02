@@ -120,28 +120,39 @@ export const DONCHIAN_MANIFEST=validateManifest({
   note:"Uses prior bars only: 55-day breakout entries and 20-day opposite-channel exits."
 });
 
-export function createDonchian(){
+export const DONCHIAN_45_10_MANIFEST=validateManifest({
+  id:"donchian-45-10",name:"Donchian 45 / 10 Shadow",version:"1.0.0",universe:["BTC-USD"],
+  sampling:"daily spot OHLC",lookback:"45 daily bars",rebalance:"daily on channel breaks",output:"target_exposure",
+  research:["Donchian robustness sweep selected 2026-10-02"],status:"replay",history_contract:{...SPOT_DAILY_HISTORY,min_observations:46},
+  note:"Frozen robustness candidate selected October 2, 2026: 45-day breakout entries and 10-day opposite-channel exits. Replay/shadow only."
+});
+
+function createDonchianVariant(manifest,entryLookback,exitLookback){
   return createCartridge({
-    manifest:DONCHIAN_MANIFEST,
+    manifest,
     createState:()=>({bars:[],position:0,last:null,lastSignal:"warming up"}),
     observe(state,observation){
       const high=Number(observation?.high),low=Number(observation?.low),close=Number(observation?.close);
       if(![high,low,close].every(Number.isFinite)||high<=0||low<=0||close<=0||high<low)throw new TypeError("Donchian requires valid OHLC");
-      const prior55=state.bars.slice(-55),prior20=state.bars.slice(-20);
-      if(prior55.length>=55){
-        const entryHigh=Math.max(...prior55.map(x=>x.high)),entryLow=Math.min(...prior55.map(x=>x.low));
-        const exitHigh=Math.max(...prior20.map(x=>x.high)),exitLow=Math.min(...prior20.map(x=>x.low));
-        if(state.position===0&&high>entryHigh){state.position=1;state.lastSignal="55-day upside breakout"}
-        else if(state.position===0&&low<entryLow){state.position=-1;state.lastSignal="55-day downside breakout"}
-        else if(state.position>0&&low<exitLow){state.position=0;state.lastSignal="20-day long exit"}
-        else if(state.position<0&&high>exitHigh){state.position=0;state.lastSignal="20-day short exit"}
+      const priorEntry=state.bars.slice(-entryLookback),priorExit=state.bars.slice(-exitLookback);
+      if(priorEntry.length>=entryLookback){
+        const entryHigh=Math.max(...priorEntry.map(x=>x.high)),entryLow=Math.min(...priorEntry.map(x=>x.low));
+        const exitHigh=Math.max(...priorExit.map(x=>x.high)),exitLow=Math.min(...priorExit.map(x=>x.low));
+        if(state.position===0&&high>entryHigh){state.position=1;state.lastSignal=entryLookback+"-day upside breakout"}
+        else if(state.position===0&&low<entryLow){state.position=-1;state.lastSignal=entryLookback+"-day downside breakout"}
+        else if(state.position>0&&low<exitLow){state.position=0;state.lastSignal=exitLookback+"-day long exit"}
+        else if(state.position<0&&high>exitHigh){state.position=0;state.lastSignal=exitLookback+"-day short exit"}
       }
-      state.bars.push({high,low,close});if(state.bars.length>55)state.bars.shift();state.last=observation;
+      state.bars.push({high,low,close});if(state.bars.length>entryLookback)state.bars.shift();state.last=observation;
     },
-    target:state=>({exposure:state.position,confidence:state.position?1:0,as_of:state.last?.receivedAt??Date.now(),leader:DONCHIAN_MANIFEST.name,
-      rationale:state.lastSignal,explanation:{position:state.position,bars:state.bars.length,entry_lookback:55,exit_lookback:20}})
+    target:state=>({exposure:state.position,confidence:state.position?1:0,as_of:state.last?.receivedAt??Date.now(),leader:manifest.name,
+      rationale:state.lastSignal,explanation:{position:state.position,bars:state.bars.length,entry_lookback:entryLookback,exit_lookback:exitLookback}})
   });
 }
+
+export function createDonchian(){return createDonchianVariant(DONCHIAN_MANIFEST,55,20)}
+export function createDonchian4510(){return createDonchianVariant(DONCHIAN_45_10_MANIFEST,45,10)}
+
 
 export const RSI_MANIFEST=validateManifest({
   id:"rsi-14-reversion",name:"RSI-14 Mean Reversion",version:"1.0.0",universe:["BTC-USD"],
@@ -192,6 +203,7 @@ export const STRATEGY_REGISTRY=Object.freeze({
   "btc-buy-hold":Object.freeze({manifest:BUY_HOLD_MANIFEST,create:createBuyHold}),
   "sma-50-200":Object.freeze({manifest:SMA_CROSS_MANIFEST,create:createSmaCross}),
   "donchian-55-20":Object.freeze({manifest:DONCHIAN_MANIFEST,create:createDonchian}),
+  "donchian-45-10":Object.freeze({manifest:DONCHIAN_45_10_MANIFEST,create:createDonchian4510}),
   "rsi-14-reversion":Object.freeze({manifest:RSI_MANIFEST,create:createRsiReversion}),
   ...Object.fromEntries(RESEARCH_CARTRIDGES.map(x=>[x.id,Object.freeze({manifest:Object.freeze(x),create:null})]))
 });

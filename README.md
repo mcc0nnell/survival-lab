@@ -38,6 +38,7 @@ History-backed cartridges are bootstrapped through the same Neon-backed history 
 - `btc-buy-hold` — constant-long BTC-USD benchmark.
 - `sma-50-200` — dual moving-average trend signal.
 - `donchian-55-20` — 55-day breakout entries with 20-day opposite-channel exits, using prior bars only.
+- `donchian-45-10` — frozen robustness candidate selected October 2, 2026 after a 65-variant parameter sweep; 45-day entries and 10-day exits, replay/shadow only.
 - `rsi-14-reversion` — Wilder-smoothed RSI threshold mean reversion.
 
 ## Historical tournament
@@ -45,6 +46,10 @@ History-backed cartridges are bootstrapped through the same Neon-backed history 
 Trader runs the five replay cartridges side by side over a trailing 365-day evaluation window. Earlier history is used only to warm strategy state. A target emitted from a closing observation applies to the next return period, so the replay does not use same-bar look-ahead. Exposure changes pay the current paper friction assumption of 20 bps fees plus 1.5 bps slippage per unit of turnover.
 
 The dashboard reports normalized equity curves, total return, maximum drawdown, annualized Sharpe, turnover, and return relative to a matched buy-and-hold benchmark. Spot cartridges compare with BTC-USD buy-and-hold; `tsmom-12m` compares with PF_XBTUSD buy-and-hold on the same month-end periods. Tournament results are historical diagnostics only and do not grant execution authority.
+
+### Donchian forward shadow
+
+The 45/10 candidate is frozen after the October 2, 2026 selection decision and is tracked against the unchanged 55/20 control beginning with the October 3 UTC daily bar. History before the freeze is warmup only. The forward-shadow panel therefore starts at zero and changes only as genuinely new daily bars arrive; no later parameter sweep rewrites that start date.
 
 ## Agents
 

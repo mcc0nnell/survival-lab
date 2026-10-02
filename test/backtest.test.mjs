@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createCartridge} from "../dist/cartridge.js";
-import {runDailyReplay,runHistoricalTournament} from "../dist/backtest.js";
+import {runDailyReplay,runHistoricalTournament,runDonchianForwardShadow,DONCHIAN_SHADOW_START} from "../dist/backtest.js";
 
 function dataset(id,n,fn){
   const start=Date.UTC(2024,0,1);
@@ -35,12 +35,12 @@ test("turnover friction is charged when target exposure changes",()=>{
   assert.ok(r.total_return<0);
 });
 
-test("historical tournament returns all five replay cartridges with benchmark-relative metrics",()=>{
+test("historical tournament returns all replay cartridges with benchmark-relative metrics",()=>{
   const spot=dataset("btc-usd-spot-1d",730,i=>100*Math.exp(.0007*i+.04*Math.sin(i/19)));
   const futures=dataset("kraken-pf-xbtusd-1d",730,i=>100*Math.exp(.0005*i+.03*Math.sin(i/23)));
   const t=runHistoricalTournament({spotDataset:spot,futuresDataset:futures,evaluationDays:365,costBps:21.5});
-  assert.equal(t.results.length,5);
-  assert.deepEqual(new Set(t.results.map(x=>x.id)),new Set(["btc-buy-hold","sma-50-200","donchian-55-20","rsi-14-reversion","tsmom-12m"]));
+  assert.equal(t.results.length,6);
+  assert.deepEqual(new Set(t.results.map(x=>x.id)),new Set(["btc-buy-hold","sma-50-200","donchian-55-20","donchian-45-10","rsi-14-reversion","tsmom-12m"]));
   for(const r of t.results){
     assert.ok(Number.isFinite(r.total_return));
     assert.ok(Number.isFinite(r.max_drawdown));
@@ -48,4 +48,18 @@ test("historical tournament returns all five replay cartridges with benchmark-re
     assert.ok(Number.isFinite(r.relative_return));
     assert.ok(r.curve.length>1);
   }
+});
+
+
+test("Donchian forward shadow is frozen after October 2 and counts only later bars",()=>{
+  const start=Date.parse("2025-10-01T00:00:00Z");
+  const observations=Array.from({length:369},(_,i)=>{
+    const close=100+i*.1;
+    return {observed_at:new Date(start+i*86400000).toISOString(),open:close,high:close+1,low:close-1,close,volume:1};
+  });
+  const spot={id:"btc-usd-spot-1d",count:observations.length,observations};
+  const shadow=runDonchianForwardShadow({spotDataset:spot,costBps:21.5});
+  assert.equal(shadow.start_at,DONCHIAN_SHADOW_START);
+  assert.equal(shadow.results.length,2);
+  for(const result of shadow.results)assert.equal(result.observations,2);
 });

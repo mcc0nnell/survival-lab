@@ -1,5 +1,5 @@
 import {dailyOhlcvObservations,aggregateMonthly,ewmaAnnualizedVol} from "./history.js";
-import {createBuyHold,createSmaCross,createDonchian,createRsiReversion,createTimeSeriesMomentum} from "./strategies.js";
+import {createBuyHold,createSmaCross,createDonchian,createDonchian4510,createRsiReversion,createTimeSeriesMomentum} from "./strategies.js";
 
 const mean=xs=>xs.length?xs.reduce((s,x)=>s+x,0)/xs.length:0;
 
@@ -27,10 +27,16 @@ function sortedDaily(dataset){
   return dailyOhlcvObservations(dataset?.observations||[]).sort((a,b)=>a.receivedAt-b.receivedAt);
 }
 
-export function runDailyReplay({id,name,create,dataset,evaluationDays=365,costBps=21.5,benchmarkId="btc-buy-hold"}){
+export function runDailyReplay({id,name,create,dataset,evaluationDays=365,startAt=null,costBps=21.5,benchmarkId="btc-buy-hold"}){
   const rows=sortedDaily(dataset);
   if(rows.length<3)throw new Error(id+" needs daily history");
-  const evalIndex=Math.max(1,rows.length-Math.max(2,evaluationDays));
+  let evalIndex;
+  if(startAt){
+    const startMs=new Date(startAt).getTime();
+    if(!Number.isFinite(startMs))throw new TypeError("invalid replay startAt");
+    const found=rows.findIndex(row=>row.receivedAt>=startMs);
+    evalIndex=found<0?rows.length:Math.max(1,found);
+  }else evalIndex=Math.max(1,rows.length-Math.max(2,evaluationDays));
   const strategy=create();
   let exposure=0;
   for(let i=0;i<evalIndex;i++){
@@ -124,6 +130,7 @@ export function runHistoricalTournament({spotDataset,futuresDataset,evaluationDa
     ["btc-buy-hold","BTC Buy & Hold",createBuyHold],
     ["sma-50-200","SMA 50 / 200 Trend",createSmaCross],
     ["donchian-55-20","Donchian 55 / 20 Breakout",createDonchian],
+    ["donchian-45-10","Donchian 45 / 10 Shadow",createDonchian4510],
     ["rsi-14-reversion","RSI-14 Mean Reversion",createRsiReversion]
   ];
   const results=spotDefs.map(([id,name,create])=>runDailyReplay({id,name,create,dataset:spotDataset,evaluationDays,costBps,
@@ -140,4 +147,19 @@ export function runHistoricalTournament({spotDataset,futuresDataset,evaluationDa
     result.relative_return=benchmark?result.total_return-benchmark.total_return:null;
   }
   return {evaluation_days:evaluationDays,cost_bps:costBps,results,futures_benchmark:futuresBenchmark};
+}
+
+
+export const DONCHIAN_SHADOW_START="2026-10-03T00:00:00Z";
+
+export function runDonchianForwardShadow({spotDataset,costBps=21.5,startAt=DONCHIAN_SHADOW_START}){
+  const defs=[
+    ["donchian-45-10","Donchian 45 / 10 Shadow",createDonchian4510],
+    ["donchian-55-20","Donchian 55 / 20 Control",createDonchian]
+  ];
+  const results=defs.map(([id,name,create])=>{
+    const result=runDailyReplay({id,name,create,dataset:spotDataset,startAt,costBps,benchmarkId:"btc-buy-hold"});
+    return {...result,evaluation_start:startAt};
+  });
+  return {start_at:startAt,cost_bps:costBps,results};
 }
