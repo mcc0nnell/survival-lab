@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - agent/neon-runner
+    paths-ignore:
+      - deploy/trader-function.b64
+
+permissions:
+  contents: write
 
 jobs:
   bundle:
@@ -17,7 +22,7 @@ jobs:
       - run: npm install --ignore-scripts
       - name: Bundle Neon Function
         run: |
-          mkdir -p build-neon
+          mkdir -p build-neon deploy
           npx --yes esbuild functions/trader.js \
             --bundle \
             --platform=node \
@@ -26,8 +31,18 @@ jobs:
             --banner:js="import{createRequire as ___cr}from'module';import{fileURLToPath as ___f}from'url';import{dirname as ___d}from'path';const require=___cr(import.meta.url);const __filename=___f(import.meta.url);const __dirname=___d(__filename);" \
             --outfile=build-neon/index.mjs
           (cd build-neon && zip -j ../trader-function.zip index.mjs)
+          base64 -w0 trader-function.zip > deploy/trader-function.b64
       - uses: actions/upload-artifact@v4
         with:
           name: neon-trader-bundle
           path: trader-function.zip
           retention-days: 1
+      - name: Publish deployable base64
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/trader-function.b64
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish Neon deployment bundle"
+            git push origin HEAD:agent/neon-runner
+          fi
