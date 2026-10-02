@@ -30,6 +30,16 @@ Strategies never receive execution authority. Each cartridge declares its univer
 
 `consensus-six` wraps the original six transparent agents behind the cartridge contract. The dashboard still renders their individual explanations, but the executor sees only the cartridge target.
 
+## Replay cartridges
+
+History-backed cartridges are bootstrapped through the same Neon-backed history plane and remain research/replay contestants rather than live executors:
+
+- `tsmom-12m` — 12-month time-series momentum on Kraken PF_XBTUSD futures.
+- `btc-buy-hold` — constant-long BTC-USD benchmark.
+- `sma-50-200` — dual moving-average trend signal.
+- `donchian-55-20` — 55-day breakout entries with 20-day opposite-channel exits, using prior bars only.
+- `rsi-14-reversion` — Wilder-smoothed RSI threshold mean reversion.
+
 ## Agents
 
 | Agent | Owns |
