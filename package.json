@@ -10,7 +10,8 @@
     "deploy:neon": "neon deploy"
   },
   "dependencies": {
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "@neon/functions": "^0.11.0"
   },
   "devDependencies": {
     "@neon/config": "^1.6.0"
