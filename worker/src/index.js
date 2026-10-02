@@ -228,6 +228,7 @@ export default {
       const now=Date.now();
       const session={started_at:new Date(now).toISOString(),run_until:now+SESSION_MS};
       await env.SURVIVAL_CONTROL.put(SESSION_KEY,JSON.stringify(session),{expirationTtl:30*60});
+      ctx.waitUntil(runTraderTick(env,now));
       return Response.json({ok:true,...sessionView(session)},{headers:cors(responseOrigin)});
     }
     if(url.pathname==="/api/control/stop"&&request.method==="POST"){
