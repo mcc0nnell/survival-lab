@@ -1,0 +1,33 @@
+name: neon bundle
+
+on:
+  push:
+    branches:
+      - agent/neon-runner
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts
+      - name: Bundle Neon Function
+        run: |
+          mkdir -p build-neon
+          npx --yes esbuild functions/trader.js \
+            --bundle \
+            --platform=node \
+            --target=node24 \
+            --format=esm \
+            --banner:js="import{createRequire as ___cr}from'module';import{fileURLToPath as ___f}from'url';import{dirname as ___d}from'path';const require=___cr(import.meta.url);const __filename=___f(import.meta.url);const __dirname=___d(__filename);" \
+            --outfile=build-neon/index.mjs
+          (cd build-neon && zip -j ../trader-function.zip index.mjs)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neon-trader-bundle
+          path: trader-function.zip
+          retention-days: 1
