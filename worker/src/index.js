@@ -3,7 +3,7 @@ import { neon } from "@neondatabase/serverless";
 const HISTORY_PRODUCTS=new Set(["BTC-USD","PF_XBTUSD"]);
 const SESSION_KEY="paper-session";
 const LEDGER_CACHE_KEY="ledger-cache";
-const SESSION_MS=20*60*1000;
+const SESSION_MS=15*60*1000;
 const cors=origin=>({
   "content-type":"application/json",
   "access-control-allow-origin":origin||"*",
@@ -29,7 +29,7 @@ function sessionView(session){
     started_at:session?.started_at||null,
     run_until:until?new Date(until).toISOString():null,
     seconds_remaining:until>now?Math.ceil((until-now)/1000):0,
-    duration_minutes:20
+    duration_minutes:15
   };
 }
 async function cacheLedger(env,sql){
