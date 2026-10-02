@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { Pool } from "pg";
+import { waitUntil } from "@neon/functions";
 import {
   DEFAULT_CONFIG,
   createAccount,
@@ -387,6 +388,15 @@ export default {
       return Response.json({ error: "not found" }, { status: 404 });
     }
     try {
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/,"");
+      const isControl=Boolean(process.env.TRADER_CONTROL_TOKEN)&&bearer===process.env.TRADER_CONTROL_TOKEN;
+      const isNeonTrigger=Boolean(request.headers.get("x-neon-trigger-invocation-id"));
+      if(isControl&&!isNeonTrigger){
+        waitUntil(handleScheduled(request.clone()).catch(error=>{
+          console.error("survival runner background failure",error);
+        }));
+        return Response.json({ok:true,accepted:true,window_ms:WINDOW_MS},{status:202});
+      }
       return await handleScheduled(request);
     } catch (error) {
       console.error("survival runner failed", error);
