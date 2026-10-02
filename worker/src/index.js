@@ -3,6 +3,7 @@ import { neon } from "@neondatabase/serverless";
 const HISTORY_PRODUCTS=new Set(["BTC-USD","PF_XBTUSD"]);
 const SESSION_KEY="paper-session";
 const LEDGER_CACHE_KEY="ledger-cache";
+const PENDING_REFRESH_KEY="pending-ledger-refresh";
 const SESSION_MS=15*60*1000;
 const cors=origin=>({
   "content-type":"application/json",
@@ -44,7 +45,20 @@ async function cacheLedger(env,sql){
   await env.SURVIVAL_CONTROL.put(LEDGER_CACHE_KEY,JSON.stringify(data),{expirationTtl:86400});
   return data;
 }
+async function refreshPendingLedger(env,now=Date.now()){
+  if(!env.SURVIVAL_CONTROL||!env.DATABASE_URL)return false;
+  const due=Number(await env.SURVIVAL_CONTROL.get(PENDING_REFRESH_KEY)||0);
+  if(!due||due>now)return false;
+  try{
+    await cacheLedger(env,neon(env.DATABASE_URL));
+    await env.SURVIVAL_CONTROL.delete(PENDING_REFRESH_KEY);
+    return true;
+  }catch{
+    return false;
+  }
+}
 async function runTraderTick(env,scheduledAt){
+  await refreshPendingLedger(env,Date.now());
   const session=await readSession(env);
   const view=sessionView(session);
   if(!view.active)return {ok:true,skipped:"idle",session:view};
@@ -59,8 +73,9 @@ async function runTraderTick(env,scheduledAt){
   });
   let result;
   try{result=await res.json()}catch{result={error:"invalid trader response"}}
-  if(env.DATABASE_URL&&env.SURVIVAL_CONTROL){
-    try{await cacheLedger(env,neon(env.DATABASE_URL))}catch{}
+  if(res.ok&&env.SURVIVAL_CONTROL){
+    const windowMs=Math.max(1000,Number(result?.window_ms)||55000);
+    await env.SURVIVAL_CONTROL.put(PENDING_REFRESH_KEY,String(Date.now()+windowMs+3000),{expirationTtl:300});
   }
   await env.SURVIVAL_CONTROL.put("last-tick",JSON.stringify({
     at:new Date().toISOString(),status:res.status,result
