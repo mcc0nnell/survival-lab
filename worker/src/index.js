@@ -1,6 +1,9 @@
 import { neon } from "@neondatabase/serverless";
 
 const HISTORY_PRODUCTS=new Set(["BTC-USD","PF_XBTUSD"]);
+const SESSION_KEY="paper-session";
+const LEDGER_CACHE_KEY="ledger-cache";
+const SESSION_MS=20*60*1000;
 const cors=origin=>({
   "content-type":"application/json",
   "access-control-allow-origin":origin||"*",
@@ -12,6 +15,52 @@ function originAllowed(allowedOrigin,requestOrigin){
   return allowedOrigin==="*"||!requestOrigin||requestOrigin===allowedOrigin;
 }
 const isoDay=d=>new Date(d).toISOString();
+
+async function readSession(env){
+  if(!env.SURVIVAL_CONTROL)return null;
+  const raw=await env.SURVIVAL_CONTROL.get(SESSION_KEY);
+  if(!raw)return null;
+  try{return JSON.parse(raw)}catch{return null}
+}
+function sessionView(session){
+  const now=Date.now(),until=Number(session?.run_until||0);
+  return {
+    active:until>now,
+    started_at:session?.started_at||null,
+    run_until:until?new Date(until).toISOString():null,
+    seconds_remaining:until>now?Math.ceil((until-now)/1000):0,
+    duration_minutes:20
+  };
+}
+async function cacheLedger(env,sql){
+  if(!env.SURVIVAL_CONTROL)return null;
+  const data=await readLedger(sql);
+  await env.SURVIVAL_CONTROL.put(LEDGER_CACHE_KEY,JSON.stringify(data),{expirationTtl:86400});
+  return data;
+}
+async function runTraderTick(env,scheduledAt){
+  const session=await readSession(env);
+  const view=sessionView(session);
+  if(!view.active)return {ok:true,skipped:"idle",session:view};
+  if(!env.TRADER_FUNCTION_URL||!env.TRADER_CONTROL_TOKEN){
+    return {ok:false,error:"trader control unavailable",session:view};
+  }
+  const invocationId="cf-"+new Date(scheduledAt).toISOString();
+  const res=await fetch(env.TRADER_FUNCTION_URL,{
+    method:"POST",
+    headers:{"content-type":"application/json","authorization":"Bearer "+env.TRADER_CONTROL_TOKEN},
+    body:JSON.stringify({data:{scheduled_at:new Date(scheduledAt).toISOString(),invocation_id:invocationId}})
+  });
+  let result;
+  try{result=await res.json()}catch{result={error:"invalid trader response"}}
+  if(env.DATABASE_URL&&env.SURVIVAL_CONTROL){
+    try{await cacheLedger(env,neon(env.DATABASE_URL))}catch{}
+  }
+  await env.SURVIVAL_CONTROL.put("last-tick",JSON.stringify({
+    at:new Date().toISOString(),status:res.status,result
+  }),{expirationTtl:86400});
+  return {ok:res.ok,status:res.status,result,session:view};
+}
 
 async function readLedger(sql){
   const runs=await sql`
@@ -153,7 +202,7 @@ async function historyPayload(sql,product,days){
 }
 
 export default {
-  async fetch(request,env){
+  async fetch(request,env,ctx){
     const allowedOrigin=env.EVIDENCE_ALLOWED_ORIGIN||"*";
     const requestOrigin=request.headers.get("origin");
     const responseOrigin=allowedOrigin==="*"?"*":allowedOrigin;
@@ -165,16 +214,44 @@ export default {
     if(url.pathname==="/healthz"){
       return Response.json({ok:true,store:"neon",history:"market_history"},{headers:cors(responseOrigin)});
     }
+
+    if(url.pathname==="/api/control/status"&&request.method==="GET"){
+      const session=sessionView(await readSession(env));
+      let last_tick=null;
+      if(env.SURVIVAL_CONTROL){
+        try{last_tick=JSON.parse(await env.SURVIVAL_CONTROL.get("last-tick")||"null")}catch{}
+      }
+      return Response.json({ok:true,...session,last_tick},{headers:{...cors(responseOrigin),"cache-control":"no-store"}});
+    }
+    if(url.pathname==="/api/control/start"&&request.method==="POST"){
+      if(!env.SURVIVAL_CONTROL)return Response.json({error:"control unavailable"},{status:503,headers:cors(responseOrigin)});
+      const now=Date.now();
+      const session={started_at:new Date(now).toISOString(),run_until:now+SESSION_MS};
+      await env.SURVIVAL_CONTROL.put(SESSION_KEY,JSON.stringify(session),{expirationTtl:30*60});
+      return Response.json({ok:true,...sessionView(session)},{headers:cors(responseOrigin)});
+    }
+    if(url.pathname==="/api/control/stop"&&request.method==="POST"){
+      if(env.SURVIVAL_CONTROL)await env.SURVIVAL_CONTROL.delete(SESSION_KEY);
+      return Response.json({ok:true,...sessionView(null)},{headers:cors(responseOrigin)});
+    }
     if(!originAllowed(allowedOrigin,requestOrigin)){
       return Response.json({error:"origin denied"},{status:403,headers:cors(responseOrigin)});
+    }
+    if(url.pathname==="/api/ledger"&&request.method==="GET"&&env.SURVIVAL_CONTROL){
+      try{
+        const cached=await env.SURVIVAL_CONTROL.get(LEDGER_CACHE_KEY,"json");
+        if(cached)return Response.json(cached,{headers:{...cors(responseOrigin),"cache-control":"no-store","x-survival-cache":"kv"}});
+      }catch{}
     }
     if(!env.DATABASE_URL){
       return Response.json({error:"database unavailable"},{status:503,headers:cors(responseOrigin)});
     }
     const sql=neon(env.DATABASE_URL);
     if(url.pathname==="/api/ledger"&&request.method==="GET"){
-      try{return Response.json(await readLedger(sql),{headers:{...cors(responseOrigin),"cache-control":"no-store"}})}
-      catch{return Response.json({error:"ledger unavailable"},{status:503,headers:cors(responseOrigin)})}
+      try{
+        const data=await cacheLedger(env,sql);
+        return Response.json(data||await readLedger(sql),{headers:{...cors(responseOrigin),"cache-control":"no-store","x-survival-cache":"neon"}});
+      }catch{return Response.json({error:"ledger unavailable"},{status:503,headers:cors(responseOrigin)})}
     }
     if(url.pathname==="/api/history"&&request.method==="GET"){
       const product=(url.searchParams.get("product")||"BTC-USD").toUpperCase();
@@ -194,5 +271,8 @@ export default {
       return Response.json({error:"browser event ingestion disabled"},{status:410,headers:cors(responseOrigin)});
     }
     return Response.json({error:"not found"},{status:404,headers:cors(responseOrigin)});
+  },
+  async scheduled(event,env,ctx){
+    ctx.waitUntil(runTraderTick(env,event.scheduledTime));
   }
 };
