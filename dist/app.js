@@ -139,7 +139,7 @@ function onFeedStatus(status,detail){
 async function boot(){
   clearTimeout(strategyTimer);clearTimeout(syntheticTimer);clearTimeout(ledgerTimer);cancelAnimationFrame(rafId);
   try{feed?.close?.()}catch{} if(log)log.close();
-  feed=makeFeed();log=new EvidenceLog({endpoint:autonomous?null:evidenceEndpoint});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
+  feed=makeFeed();log=new EvidenceLog({endpoint:null});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
   el("feed").innerHTML="";document.querySelector(".mode").textContent=autonomous?"NEON PAPER":feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
   el("shock").disabled=feedMode==="live";el("shock").title=feedMode==="live"?"Shock injection is available only in deterministic synthetic mode.":"";
   el("speed").disabled=feedMode==="live";el("speed").textContent=feedMode==="live"?"STREAMING":"1× SPEED";
