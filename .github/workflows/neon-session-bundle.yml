@@ -1,0 +1,43 @@
+name: neon session bundle
+
+on:
+  push:
+    branches:
+      - agent/neon-session-bundle
+    paths-ignore:
+      - deploy/trader-function.b64
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts
+      - name: Bundle Neon Function
+        run: |
+          mkdir -p build-neon deploy
+          npx --yes esbuild functions/trader.js \
+            --bundle \
+            --platform=node \
+            --target=node24 \
+            --format=esm \
+            --banner:js="import{createRequire as ___cr}from'module';import{fileURLToPath as ___f}from'url';import{dirname as ___d}from'path';const require=___cr(import.meta.url);const __filename=___f(import.meta.url);const __dirname=___d(__filename);" \
+            --outfile=build-neon/index.mjs
+          (cd build-neon && zip -j ../trader-function.zip index.mjs)
+          base64 -w0 trader-function.zip > deploy/trader-function.b64
+      - name: Publish deployable base64
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/trader-function.b64
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish Neon session bundle"
+            git push origin HEAD:agent/neon-session-bundle
+          fi
