@@ -93,7 +93,7 @@ export const SMA_CROSS_MANIFEST=validateManifest({
   id:"sma-50-200",name:"SMA 50 / 200 Trend",version:"1.0.0",universe:["BTC-USD"],
   sampling:"daily spot close",lookback:"200 daily closes",rebalance:"daily",output:"target_exposure",
   research:["dual moving-average trend following"],status:"replay",history_contract:{...SPOT_DAILY_HISTORY,min_observations:200},
-  note:"Transparent dual-moving-average trend cartridge; +1 above the 200-day average, -1 below it."
+  note:"Transparent dual-moving-average trend cartridge; +1 when SMA-50 is above SMA-200, -1 when it is below."
 });
 
 export function createSmaCross(){
@@ -153,24 +153,27 @@ export const RSI_MANIFEST=validateManifest({
 export function createRsiReversion(){
   return createCartridge({
     manifest:RSI_MANIFEST,
-    createState:()=>({closes:[],position:0,last:null,rsi:null,lastSignal:"warming up"}),
+    createState:()=>({previous:null,seedGains:[],seedLosses:[],avgGain:null,avgLoss:null,position:0,last:null,rsi:null,count:0,lastSignal:"warming up"}),
     observe(state,observation){
       const close=Number(observation?.close);if(!Number.isFinite(close)||close<=0)throw new TypeError("RSI-14 requires positive close");
-      state.closes.push(close);if(state.closes.length>15)state.closes.shift();state.last=observation;
-      if(state.closes.length<15)return;
-      let gains=0,losses=0;
-      for(let i=1;i<state.closes.length;i++){
-        const d=state.closes[i]-state.closes[i-1];if(d>0)gains+=d;else losses-=d;
+      state.last=observation;state.count++;
+      if(state.previous==null){state.previous=close;return}
+      const change=close-state.previous,gain=Math.max(change,0),loss=Math.max(-change,0);state.previous=close;
+      if(state.avgGain==null){
+        state.seedGains.push(gain);state.seedLosses.push(loss);
+        if(state.seedGains.length<14)return;
+        state.avgGain=mean(state.seedGains);state.avgLoss=mean(state.seedLosses);
+      }else{
+        state.avgGain=(state.avgGain*13+gain)/14;state.avgLoss=(state.avgLoss*13+loss)/14;
       }
-      const avgGain=gains/14,avgLoss=losses/14;
-      state.rsi=avgLoss===0?100:avgGain===0?0:100-(100/(1+avgGain/avgLoss));
+      state.rsi=state.avgLoss===0?100:state.avgGain===0?0:100-(100/(1+state.avgGain/state.avgLoss));
       if(state.position===0&&state.rsi<30){state.position=1;state.lastSignal="RSI below 30"}
       else if(state.position===0&&state.rsi>70){state.position=-1;state.lastSignal="RSI above 70"}
       else if(state.position>0&&state.rsi>=50){state.position=0;state.lastSignal="RSI long exit at midline"}
       else if(state.position<0&&state.rsi<=50){state.position=0;state.lastSignal="RSI short exit at midline"}
     },
     target:state=>({exposure:state.position,confidence:Number.isFinite(state.rsi)?Math.min(1,Math.abs(state.rsi-50)/50):0,as_of:state.last?.receivedAt??Date.now(),leader:RSI_MANIFEST.name,
-      rationale:state.lastSignal,explanation:{rsi_14:state.rsi,position:state.position,observations:state.closes.length}})
+      rationale:state.lastSignal,explanation:{rsi_14:state.rsi,position:state.position,observations:state.count,method:"Wilder smoothing"}})
   });
 }
 
