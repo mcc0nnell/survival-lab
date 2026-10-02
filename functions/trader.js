@@ -50,6 +50,11 @@ function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
+function controlToken() {
+  const databaseUrl=process.env.DATABASE_URL||"";
+  return databaseUrl ? sha256("survival-lab-control-v1:"+databaseUrl) : "";
+}
+
 function createEvidenceRun() {
   const runId = crypto.randomUUID();
   let sequence = 0;
@@ -247,7 +252,8 @@ async function handleScheduled(request) {
   const triggerInvocationId = request.headers.get("x-neon-trigger-invocation-id");
   const authHeader = request.headers.get("authorization") || "";
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  const controlAuthorized = Boolean(process.env.TRADER_CONTROL_TOKEN) && bearer === process.env.TRADER_CONTROL_TOKEN;
+  const expectedControlToken=controlToken();
+  const controlAuthorized = Boolean(expectedControlToken) && bearer === expectedControlToken;
   if (!triggerInvocationId && !controlAuthorized) {
     return Response.json({ error: "unauthorized invocation" }, { status: 403 });
   }
@@ -389,7 +395,8 @@ export default {
     }
     try {
       const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/,"");
-      const isControl=Boolean(process.env.TRADER_CONTROL_TOKEN)&&bearer===process.env.TRADER_CONTROL_TOKEN;
+      const expectedControlToken=controlToken();
+      const isControl=Boolean(expectedControlToken)&&bearer===expectedControlToken;
       const isNeonTrigger=Boolean(request.headers.get("x-neon-trigger-invocation-id"));
       if(isControl&&!isNeonTrigger){
         waitUntil(handleScheduled(request.clone()).catch(error=>{
