@@ -230,6 +230,7 @@ export default {
       return Response.json({ok:true,...session,last_tick},{headers:{...cors(responseOrigin),"cache-control":"no-store"}});
     }
     if(url.pathname==="/api/control/start"&&request.method==="POST"){
+      if(!requestOrigin||requestOrigin!==allowedOrigin)return Response.json({error:"origin denied"},{status:403,headers:cors(responseOrigin)});
       if(!env.SURVIVAL_CONTROL)return Response.json({error:"control unavailable"},{status:503,headers:cors(responseOrigin)});
       const now=Date.now();
       const session={started_at:new Date(now).toISOString(),run_until:now+SESSION_MS};
@@ -238,6 +239,7 @@ export default {
       return Response.json({ok:true,...sessionView(session)},{headers:cors(responseOrigin)});
     }
     if(url.pathname==="/api/control/stop"&&request.method==="POST"){
+      if(!requestOrigin||requestOrigin!==allowedOrigin)return Response.json({error:"origin denied"},{status:403,headers:cors(responseOrigin)});
       if(env.SURVIVAL_CONTROL)await env.SURVIVAL_CONTROL.delete(SESSION_KEY);
       return Response.json({ok:true,...sessionView(null)},{headers:cors(responseOrigin)});
     }
