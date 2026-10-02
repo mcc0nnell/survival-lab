@@ -40,6 +40,12 @@ History-backed cartridges are bootstrapped through the same Neon-backed history 
 - `donchian-55-20` — 55-day breakout entries with 20-day opposite-channel exits, using prior bars only.
 - `rsi-14-reversion` — Wilder-smoothed RSI threshold mean reversion.
 
+## Historical tournament
+
+Trader runs the five replay cartridges side by side over a trailing 365-day evaluation window. Earlier history is used only to warm strategy state. A target emitted from a closing observation applies to the next return period, so the replay does not use same-bar look-ahead. Exposure changes pay the current paper friction assumption of 20 bps fees plus 1.5 bps slippage per unit of turnover.
+
+The dashboard reports normalized equity curves, total return, maximum drawdown, annualized Sharpe, turnover, and return relative to a matched buy-and-hold benchmark. Spot cartridges compare with BTC-USD buy-and-hold; `tsmom-12m` compares with PF_XBTUSD buy-and-hold on the same month-end periods. Tournament results are historical diagnostics only and do not grant execution authority.
+
 ## Agents
 
 | Agent | Owns |

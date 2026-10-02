@@ -1,6 +1,7 @@
 import {DEFAULT_CONFIG,AGENTS,createAccount,markAccount,riskDecision,openPaper,closePaper,evaluateExit,enforceKillSwitch} from "./core.js";
 import {createStrategy,STRATEGY_REGISTRY} from "./strategies.js";
 import {HistoryPlane,compatibility,bootstrapStrategy} from "./history.js";
+import {runHistoricalTournament} from "./backtest.js";
 import {CoinbaseFeed,SyntheticFeed} from "./feed.js";
 import {EvidenceLog} from "./evidence.js";
 
@@ -14,7 +15,7 @@ const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history"
 const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null;
 const strategyPreviews=new Map();
 
 function newState(){
@@ -80,6 +81,54 @@ function renderStrategyCatalog(){
   });
   el("strategyCatalog").innerHTML=cards.join("");
 }
+function fmtPct(v){
+  const n=Number(v);return Number.isFinite(n)?(n>=0?"+":"")+(n*100).toFixed(2)+"%":"—";
+}
+function fmtSharpe(v){
+  const n=Number(v);return Number.isFinite(n)?n.toFixed(2):"—";
+}
+function drawTournamentChart(){
+  const c=el("tournamentChart");if(!c||!tournamentData?.results?.length)return;
+  const dpr=Math.min(devicePixelRatio||1,2),w=c.clientWidth,h=c.clientHeight;
+  const pw=Math.max(1,Math.round(w*dpr)),ph=Math.max(1,Math.round(h*dpr));
+  if(c.width!==pw||c.height!==ph){c.width=pw;c.height=ph}
+  const x=c.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+  x.strokeStyle="#172026";x.lineWidth=1;
+  for(let i=0;i<5;i++){const y=16+i*(h-34)/4;x.beginPath();x.moveTo(10,y);x.lineTo(w-10,y);x.stroke()}
+  const curves=tournamentData.results.map(r=>r.curve).filter(a=>a?.length);
+  const all=curves.flat(),times=all.map(p=>new Date(p.at).getTime()).filter(Number.isFinite),values=all.map(p=>p.equity).filter(Number.isFinite);
+  if(!times.length||!values.length)return;
+  const minT=Math.min(...times),maxT=Math.max(...times),minV=Math.min(...values),maxV=Math.max(...values),spanT=maxT-minT||1,spanV=maxV-minV||1;
+  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff"];
+  tournamentData.results.forEach((r,i)=>{
+    if(!r.curve?.length)return;
+    x.strokeStyle=colors[i%colors.length];x.lineWidth=1.6;x.beginPath();
+    r.curve.forEach((p,j)=>{
+      const t=new Date(p.at).getTime(),px=10+(t-minT)/spanT*(w-20),py=16+(maxV-p.equity)/spanV*(h-34);
+      j?x.lineTo(px,py):x.moveTo(px,py);
+    });
+    x.stroke();
+  });
+}
+function renderTournament(){
+  if(!el("tournamentRows"))return;
+  if(!tournamentData?.results?.length){
+    el("tournamentRows").innerHTML='<div class="tournamentEmpty">Waiting for history.</div>';
+    el("tournamentLegend").innerHTML="";
+    return;
+  }
+  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff"];
+  const ranked=[...tournamentData.results].sort((a,b)=>b.total_return-a.total_return);
+  el("tournamentRows").innerHTML='<div class="tournamentRow tournamentHeader"><b>STRATEGY</b><span>RETURN</span><span>MAX DD</span><span>SHARPE</span><span>TURNOVER</span><span>VS BENCH</span></div>'+
+    ranked.map((r,i)=>'<div class="tournamentRow"><b>#'+(i+1)+' '+r.name+'</b>'+
+      '<span class="'+(r.total_return>=0?"pos":"neg")+'">'+fmtPct(r.total_return)+'</span>'+
+      '<span>'+fmtPct(-r.max_drawdown).replace("-","")+'</span>'+
+      '<span>'+fmtSharpe(r.sharpe)+'</span><span>'+r.turnover.toFixed(1)+'×</span>'+
+      '<span class="'+(r.relative_return>=0?"pos":"neg")+'">'+fmtPct(r.relative_return)+'</span></div>').join("");
+  el("tournamentLegend").innerHTML=tournamentData.results.map((r,i)=>'<span><i style="background:'+colors[i%colors.length]+'"></i>'+r.name+'</span>').join("");
+  el("tournamentState").textContent=tournamentData.evaluation_days+"D · "+tournamentData.cost_bps.toFixed(1)+" BPS / TURNOVER · PRIOR HISTORY WARMUP";
+  requestAnimationFrame(drawTournamentChart);
+}
 async function recordHistorySnapshot(dataset){
   await log?.append("history.snapshot",{
     dataset_id:dataset.id,provider:dataset.provider,product:dataset.product,
@@ -92,8 +141,8 @@ async function loadHistoryPlane(){
   if(!historyEndpoint){el("historyState").textContent="HISTORY · UNAVAILABLE";return}
   try{
     [historyDataset,futuresDataset]=await Promise.all([
-      historyPlane.load("btc-usd-spot-1d",{days:430}),
-      historyPlane.load("kraken-pf-xbtusd-1d",{days:430})
+      historyPlane.load("btc-usd-spot-1d",{days:720}),
+      historyPlane.load("kraken-pf-xbtusd-1d",{days:720})
     ]);
     strategyPreviews.clear();
     for(const entry of Object.values(STRATEGY_REGISTRY)){
@@ -102,13 +151,20 @@ async function loadHistoryPlane(){
       const boot=bootstrapStrategy(preview,historyPlane);
       if(boot.ready&&boot.target)strategyPreviews.set(entry.manifest.id,boot.target);
     }
+    tournamentData=runHistoricalTournament({
+      spotDataset:historyDataset,futuresDataset,evaluationDays:365,
+      costBps:DEFAULT_CONFIG.feeBps+DEFAULT_CONFIG.slippageBps
+    });
     el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" · FUTURES "+futuresDataset.count+" · THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
+    renderTournament();
     await Promise.all([recordHistorySnapshot(historyDataset),recordHistorySnapshot(futuresDataset)]);
   }catch(e){
+    tournamentData=null;
     el("historyState").textContent="HISTORY · ERROR";
+    el("tournamentState").textContent="TOURNAMENT · UNAVAILABLE";
     addEvent("sell","HISTORY",e.message);
   }
-  renderStrategyCatalog();
+  renderStrategyCatalog();renderTournament();
 }
 
 function addEvent(kind,who,msg){
@@ -342,6 +398,6 @@ el("pause").onclick=()=>{
 el("speed").onclick=()=>{if(feedMode!=="synthetic")return;speed=speed===1?2:speed===2?4:1;el("speed").textContent=speed+"× SPEED"};
 el("shock").onclick=()=>{if(feedMode!=="synthetic")return;const shock=feed.shock();addEvent("sys","SHOCK",(shock>0?"+":"")+(shock*100).toFixed(2)+"% event queued")};
 el("reset").onclick=boot;
-window.addEventListener("resize",()=>{state.depthDirty=true});
+window.addEventListener("resize",()=>{state.depthDirty=true;drawTournamentChart()});
 window.addEventListener("pagehide",()=>{try{feed?.close?.();log?.close?.()}catch{}},{once:true});
 boot();
