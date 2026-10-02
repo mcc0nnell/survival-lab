@@ -68,7 +68,7 @@ Production live-paper execution is owned by Neon, not by the browser. `neon.ts` 
 
 `trader.mcc0nnell.org` remains the Cloudflare-hosted viewer and live market visualization. In production live mode it reads the authoritative account state from the Neon-backed ledger and does not execute paper orders locally. `?feed=synthetic` remains a browser-local deterministic executor for regression and shock testing. The default duty cycle can be tuned with `TRADER_WINDOW_MS` and `TRADER_SAMPLE_MS`.
 
-Deploy the Neon runtime and schedule from the linked project with `npm run deploy:neon`.
+Set `SURVIVAL_DATABASE_URL` to the pooled connection string for the `survival_lab` database, then deploy the Neon runtime and schedule from the linked project with `npm run deploy:neon`. The explicit database binding is required because the branch contains multiple databases and the branch-default `DATABASE_URL` is not Survival Lab.
 
 ## Evidence
 
