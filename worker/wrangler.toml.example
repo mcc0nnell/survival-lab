@@ -4,3 +4,11 @@ compatibility_date = "2026-09-30"
 
 [vars]
 EVIDENCE_ALLOWED_ORIGIN = "https://trader.mcc0nnell.org"
+TRADER_FUNCTION_URL = "https://br-orange-voice-b4ljfbs7-trader.compute.c-6.us-east-2.aws.neon.tech/"
+
+[[kv_namespaces]]
+binding = "SURVIVAL_CONTROL"
+id = "6211d35a21c54799a9e17a65e3da1ae9"
+
+[triggers]
+crons = ["* * * * *"]
