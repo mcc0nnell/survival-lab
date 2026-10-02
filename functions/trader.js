@@ -16,7 +16,7 @@ import { CoinbaseFeed } from "../dist/feed.js";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 const RUNNER = "neon-scheduled";
 const LOCK_KEY = "survival-lab-neon-runner";
-const WINDOW_MS = boundedInt(process.env.TRADER_WINDOW_MS, 18_000, 5_000, 45_000);
+const WINDOW_MS = boundedInt(process.env.TRADER_WINDOW_MS, 55_000, 5_000, 58_000);
 const SAMPLE_MS = boundedInt(process.env.TRADER_SAMPLE_MS, 1_000, 500, 5_000);
 const HISTORY_LIMIT = 90;
 
@@ -243,14 +243,20 @@ async function runWindow(state, strategy, evidence) {
 }
 
 async function handleScheduled(request) {
-  const invocationId = request.headers.get("x-neon-trigger-invocation-id");
-  if (!invocationId) return Response.json({ error: "not a Neon trigger call" }, { status: 403 });
+  const triggerInvocationId = request.headers.get("x-neon-trigger-invocation-id");
+  const authHeader = request.headers.get("authorization") || "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const controlAuthorized = Boolean(process.env.TRADER_CONTROL_TOKEN) && bearer === process.env.TRADER_CONTROL_TOKEN;
+  if (!triggerInvocationId && !controlAuthorized) {
+    return Response.json({ error: "unauthorized invocation" }, { status: 403 });
+  }
 
   let body;
   try { body = await request.json(); }
   catch { return Response.json({ error: "invalid trigger payload" }, { status: 400 }); }
   const scheduledAt = body?.data?.scheduled_at;
   if (!scheduledAt) return Response.json({ error: "scheduled_at missing" }, { status: 400 });
+  const invocationId = triggerInvocationId || body?.data?.invocation_id || ("control-" + scheduledAt);
 
   const client = await pool.connect();
   let locked = false;
@@ -349,6 +355,17 @@ async function handleScheduled(request) {
       samples,
       tick: state.tick,
       equity: state.account.equity,
+      account: {
+        cash: state.account.cash,
+        equity: state.account.equity,
+        realized: state.account.realized,
+        trades: state.account.trades,
+        wins: state.account.wins,
+        losses: state.account.losses,
+        halted: state.account.halted,
+        haltReason: state.account.haltReason,
+        position: state.account.position
+      },
       error
     }, { status: error ? 207 : 200 });
   } finally {
