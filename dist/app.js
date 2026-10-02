@@ -43,7 +43,7 @@ function renderSessionControl(){
     el("stopRun").textContent="STOP · "+String(mins).padStart(2,"0")+":"+String(secs).padStart(2,"0");
     document.querySelector(".mode").textContent="NEON PAPER · RUNNING";
   }else{
-    el("run20").textContent="RUN 20 MIN";
+    el("run20").textContent="RUN 15 MIN";
     document.querySelector(".mode").textContent="NEON PAPER · IDLE";
   }
 }
@@ -70,7 +70,7 @@ async function setSession(action){
     const data=await res.json();
     sessionUntil=data.active&&data.run_until?Date.parse(data.run_until):0;
     renderSessionControl();
-    addEvent("sys","SYSTEM",action==="start"?"20-minute Neon session armed":"Neon session stopped");
+    addEvent("sys","SYSTEM",action==="start"?"15-minute Neon session armed":"Neon session stopped");
   }catch(e){
     addEvent("sell","CONTROL","Timer control failed · "+e.message);
   }finally{
