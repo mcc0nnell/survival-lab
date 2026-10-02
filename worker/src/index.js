@@ -191,6 +191,9 @@ export default {
         return Response.json({error:"history unavailable",detail:String(e?.message||e)},{status:503,headers:cors(responseOrigin)});
       }
     }
+    if(url.pathname==="/api/events"&&request.method==="POST"){
+      return Response.json({error:"browser event ingestion disabled"},{status:410,headers:cors(responseOrigin)});
+    }
     if(url.pathname!=="/api/events"||request.method!=="POST"){
       return Response.json({error:"not found"},{status:404,headers:cors(responseOrigin)});
     }
