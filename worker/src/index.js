@@ -22,6 +22,12 @@ async function readSession(env){
   if(!raw)return null;
   try{return JSON.parse(raw)}catch{return null}
 }
+async function controlToken(env){
+  if(!env.DATABASE_URL)return "";
+  const data=new TextEncoder().encode("survival-lab-control-v1:"+env.DATABASE_URL);
+  const digest=await crypto.subtle.digest("SHA-256",data);
+  return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
+}
 function sessionView(session){
   const now=Date.now(),until=Number(session?.run_until||0);
   return {
@@ -42,13 +48,13 @@ async function runTraderTick(env,scheduledAt){
   const session=await readSession(env);
   const view=sessionView(session);
   if(!view.active)return {ok:true,skipped:"idle",session:view};
-  if(!env.TRADER_FUNCTION_URL||!env.TRADER_CONTROL_TOKEN){
+  if(!env.TRADER_FUNCTION_URL||!env.DATABASE_URL){
     return {ok:false,error:"trader control unavailable",session:view};
   }
   const invocationId="cf-"+new Date(scheduledAt).toISOString();
   const res=await fetch(env.TRADER_FUNCTION_URL,{
     method:"POST",
-    headers:{"content-type":"application/json","authorization":"Bearer "+env.TRADER_CONTROL_TOKEN},
+    headers:{"content-type":"application/json","authorization":"Bearer "+await controlToken(env)},
     body:JSON.stringify({data:{scheduled_at:new Date(scheduledAt).toISOString(),invocation_id:invocationId}})
   });
   let result;
