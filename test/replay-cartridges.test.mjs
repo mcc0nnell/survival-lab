@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BUY_HOLD_MANIFEST,SMA_CROSS_MANIFEST,DONCHIAN_MANIFEST,RSI_MANIFEST,
-  createBuyHold,createSmaCross,createDonchian,createRsiReversion,STRATEGY_REGISTRY
+  BUY_HOLD_MANIFEST,SMA_CROSS_MANIFEST,DONCHIAN_MANIFEST,DONCHIAN_45_10_MANIFEST,RSI_MANIFEST,
+  createBuyHold,createSmaCross,createDonchian,createDonchian4510,createRsiReversion,STRATEGY_REGISTRY
 } from "../dist/strategies.js";
 import {HISTORY_DATASETS,compatibility,bootstrapStrategy,dailyOhlcvObservations} from "../dist/history.js";
 
@@ -16,7 +16,7 @@ function spotPlane(rows){
 }
 
 test("new replay cartridges are executable and declare the existing spot history plane",()=>{
-  for(const manifest of [BUY_HOLD_MANIFEST,SMA_CROSS_MANIFEST,DONCHIAN_MANIFEST,RSI_MANIFEST]){
+  for(const manifest of [BUY_HOLD_MANIFEST,SMA_CROSS_MANIFEST,DONCHIAN_MANIFEST,DONCHIAN_45_10_MANIFEST,RSI_MANIFEST]){
     const entry=STRATEGY_REGISTRY[manifest.id];
     assert.equal(typeof entry.create,"function");
     assert.equal(manifest.status,"replay");
@@ -57,6 +57,18 @@ test("Donchian waits for 55 prior bars, then enters only on a fresh breakout",()
   assert.match(c.target().rationale,/upside breakout/);
 });
 
+
+
+test("Donchian 45/10 shadow uses its frozen channel lengths",()=>{
+  const c=createDonchian4510();
+  for(let i=0;i<45;i++)c.observe(bar(100,{high:101,low:99,receivedAt:i}));
+  assert.equal(c.target().exposure,0);
+  c.observe(bar(102,{high:103,low:101,receivedAt:46}));
+  assert.equal(c.target().exposure,1);
+  assert.equal(c.target().explanation.entry_lookback,45);
+  assert.equal(c.target().explanation.exit_lookback,10);
+});
+
 test("RSI-14 mean reversion goes long after persistent losses and short after persistent gains",()=>{
   const down=createRsiReversion();
   for(let i=0;i<15;i++)down.observe(bar(100-i));
@@ -71,7 +83,7 @@ test("RSI-14 mean reversion goes long after persistent losses and short after pe
 test("all new cartridges bootstrap from one cached spot dataset",()=>{
   const rows=Array.from({length:430},(_,i)=>bar(100+i*.2+Math.sin(i/10),{high:101+i*.2+Math.sin(i/10),low:99+i*.2+Math.sin(i/10),receivedAt:i}));
   const plane=spotPlane(rows);
-  for(const create of [createBuyHold,createSmaCross,createDonchian,createRsiReversion]){
+  for(const create of [createBuyHold,createSmaCross,createDonchian,createDonchian4510,createRsiReversion]){
     const strategy=create();
     assert.equal(compatibility(strategy.manifest,plane).state,"READY");
     const boot=bootstrapStrategy(strategy,plane);

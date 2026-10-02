@@ -1,7 +1,7 @@
 import {DEFAULT_CONFIG,AGENTS,createAccount,markAccount,riskDecision,openPaper,closePaper,evaluateExit,enforceKillSwitch} from "./core.js";
 import {createStrategy,STRATEGY_REGISTRY} from "./strategies.js";
 import {HistoryPlane,compatibility,bootstrapStrategy} from "./history.js";
-import {runHistoricalTournament} from "./backtest.js";
+import {runHistoricalTournament,runDonchianForwardShadow,DONCHIAN_SHADOW_START} from "./backtest.js";
 import {CoinbaseFeed,SyntheticFeed} from "./feed.js";
 import {EvidenceLog} from "./evidence.js";
 
@@ -16,7 +16,7 @@ const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history"
 const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,controlPollTimer,controlClockTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null,sessionUntil=0;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,controlPollTimer,controlClockTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null,shadowData=null,sessionUntil=0;
 const strategyPreviews=new Map();
 
 function newState(){
@@ -146,7 +146,7 @@ function drawTournamentChart(){
   const all=curves.flat(),times=all.map(p=>new Date(p.at).getTime()).filter(Number.isFinite),values=all.map(p=>p.equity).filter(Number.isFinite);
   if(!times.length||!values.length)return;
   const minT=Math.min(...times),maxT=Math.max(...times),minV=Math.min(...values),maxV=Math.max(...values),spanT=maxT-minT||1,spanV=maxV-minV||1;
-  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff"];
+  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff","#8fe0c0"];
   tournamentData.results.forEach((r,i)=>{
     if(!r.curve?.length)return;
     x.strokeStyle=colors[i%colors.length];x.lineWidth=1.6;x.beginPath();
@@ -164,7 +164,7 @@ function renderTournament(){
     el("tournamentLegend").innerHTML="";
     return;
   }
-  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff"];
+  const colors=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff","#8fe0c0"];
   const ranked=[...tournamentData.results].sort((a,b)=>b.total_return-a.total_return);
   el("tournamentRows").innerHTML='<div class="tournamentRow tournamentHeader"><b>STRATEGY</b><span>RETURN</span><span>MAX DD</span><span>SHARPE</span><span>TURNOVER</span><span>VS BENCH</span></div>'+
     ranked.map((r,i)=>'<div class="tournamentRow"><b>#'+(i+1)+' '+r.name+'</b>'+
@@ -176,6 +176,25 @@ function renderTournament(){
   el("tournamentState").textContent=tournamentData.evaluation_days+"D · "+tournamentData.cost_bps.toFixed(1)+" BPS / TURNOVER · PRIOR HISTORY WARMUP";
   requestAnimationFrame(drawTournamentChart);
 }
+
+function renderShadow(){
+  if(!el("shadowRows"))return;
+  if(!shadowData?.results?.length){
+    el("shadowRows").innerHTML='<div class="tournamentEmpty">Waiting for history.</div>';
+    el("shadowState").textContent="FROZEN AFTER 2026-10-02";
+    return;
+  }
+  const observations=Math.max(...shadowData.results.map(r=>r.observations||0));
+  el("shadowState").textContent=observations
+    ?"OUT-OF-SAMPLE · "+observations+" DAILY BARS · START "+DONCHIAN_SHADOW_START.slice(0,10)
+    :"FROZEN AFTER 2026-10-02 · WAITING FOR FIRST NEW DAILY BAR";
+  el("shadowRows").innerHTML='<div class="shadowRow shadowHeader"><b>STRATEGY</b><span>RETURN</span><span>MAX DD</span><span>SHARPE</span><span>TURNOVER</span><span>BARS</span></div>'+
+    shadowData.results.map(r=>'<div class="shadowRow"><b>'+r.name+'</b>'+
+      '<span class="'+(r.total_return>=0?"pos":"neg")+'">'+fmtPct(r.total_return)+'</span>'+
+      '<span>'+fmtPct(-r.max_drawdown).replace("-","")+'</span>'+
+      '<span>'+fmtSharpe(r.sharpe)+'</span><span>'+r.turnover.toFixed(1)+'×</span><span>'+r.observations+'</span></div>').join("");
+}
+
 async function recordHistorySnapshot(dataset){
   await log?.append("history.snapshot",{
     dataset_id:dataset.id,provider:dataset.provider,product:dataset.product,
@@ -202,16 +221,19 @@ async function loadHistoryPlane(){
       spotDataset:historyDataset,futuresDataset,evaluationDays:365,
       costBps:DEFAULT_CONFIG.feeBps+DEFAULT_CONFIG.slippageBps
     });
+    shadowData=runDonchianForwardShadow({
+      spotDataset:historyDataset,costBps:DEFAULT_CONFIG.feeBps+DEFAULT_CONFIG.slippageBps
+    });
     el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" · FUTURES "+futuresDataset.count+" · THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
-    renderTournament();
+    renderTournament();renderShadow();
     await Promise.all([recordHistorySnapshot(historyDataset),recordHistorySnapshot(futuresDataset)]);
   }catch(e){
-    tournamentData=null;
+    tournamentData=null;shadowData=null;
     el("historyState").textContent="HISTORY · ERROR";
     el("tournamentState").textContent="TOURNAMENT · UNAVAILABLE";
     addEvent("sell","HISTORY",e.message);
   }
-  renderStrategyCatalog();renderTournament();
+  renderStrategyCatalog();renderTournament();renderShadow();
 }
 
 function addEvent(kind,who,msg){
