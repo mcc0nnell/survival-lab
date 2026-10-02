@@ -72,11 +72,11 @@ Set `SURVIVAL_DATABASE_URL` to the pooled connection string for the `survival_la
 
 ## Evidence
 
-Every strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.
+Every autonomous strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain and is written directly by the scheduled Neon runner. Browser sessions keep only a bounded local evidence copy; production browser event ingestion is disabled so stale or pre-deploy tabs cannot contaminate the authoritative ledger.
 
-The browser retains a bounded local copy if remote ingestion is unavailable. The evidence Worker exposes a sanitized read-only `/api/ledger` view for the dashboard, so recent run summaries and strategy/evidence events are visible on Trader without exposing database credentials or arbitrary SQL. The Neon connection remains a Cloudflare Worker secret.
+The evidence Worker exposes a sanitized read-only `/api/ledger` view for the dashboard, so recent run summaries, strategy/evidence events, and the latest authoritative runner account state are visible on Trader without exposing database credentials or arbitrary SQL. The Neon connection remains a Cloudflare Worker secret.
 
-`schema.sql` defines both the Neon event store and the normalized `market_history` cache. `worker/` contains the server-side ingestion/read boundary. It accepts bounded evidence batches, de-duplicates them by `(run_id, sequence)`, exposes the sanitized ledger, and hydrates allowlisted daily history datasets into Neon.
+`schema.sql` defines both the Neon event store and the normalized `market_history` cache. `worker/` is the server-side read/history boundary: it exposes the sanitized ledger and hydrates allowlisted daily history datasets into Neon. `POST /api/events` returns `410` in production; autonomous evidence goes directly from the Neon Function to Postgres.
 
 ## Run and test
 
