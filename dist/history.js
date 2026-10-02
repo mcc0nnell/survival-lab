@@ -83,6 +83,13 @@ export function tsmomObservationsFromDaily(daily){
   }).filter(x=>Number.isFinite(x.exAnteVol)&&x.exAnteVol>0);
 }
 
+export function dailyOhlcvObservations(daily){
+  return (daily||[]).map(row=>({
+    open:Number(row.open),high:Number(row.high),low:Number(row.low),close:Number(row.close),volume:Number(row.volume),
+    receivedAt:new Date(row.observed_at).getTime(),observed_at:row.observed_at
+  })).filter(row=>Number.isFinite(row.close)&&row.close>0&&Number.isFinite(row.receivedAt));
+}
+
 function resolveDataset(need,input){
   if(!need)return null;
   if(input instanceof Map)return input.get(need.dataset_id)||null;
@@ -111,10 +118,15 @@ export function bootstrapStrategy(strategy,plane){
   const dataset=plane.get(need.dataset_id);
   const c=compatibility(strategy.manifest,plane);
   if(c.state!=="READY")return {ready:false,count:0,reason:c.reason,target:null};
-  let observations;
-  if(need.adapter==="tsmom-12m-v1")observations=tsmomObservationsFromDaily(dataset.observations);
-  else throw new Error("unknown history adapter: "+need.adapter);
+  let observations,minimum;
+  if(need.adapter==="tsmom-12m-v1"){
+    observations=tsmomObservationsFromDaily(dataset.observations);
+    minimum=12;
+  }else if(need.adapter==="daily-ohlcv-v1"){
+    observations=dailyOhlcvObservations(dataset.observations);
+    minimum=Number(need.min_observations||1);
+  }else throw new Error("unknown history adapter: "+need.adapter);
   strategy.reset();
   for(const observation of observations)strategy.observe(observation);
-  return {ready:observations.length>=12,count:observations.length,target:strategy.target(),reason:"bootstrapped from "+need.dataset_id};
+  return {ready:observations.length>=minimum,count:observations.length,target:strategy.target(),reason:"bootstrapped from "+need.dataset_id};
 }
