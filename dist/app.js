@@ -11,11 +11,12 @@ const evidenceEndpoint=document.querySelector('meta[name="survival-evidence-endp
 const executionMode=document.querySelector('meta[name="survival-execution-mode"]')?.content||"browser";
 const autonomous=executionMode==="neon"&&feedMode==="live";
 const ledgerEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/ledger")||null;
+const controlBase=evidenceEndpoint?.replace(/\/api\/events$/, "/api/control")||null;
 const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history")||null;
 const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
 const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,controlPollTimer,controlClockTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null,sessionUntil=0;
 const strategyPreviews=new Map();
 
 function newState(){
@@ -30,6 +31,52 @@ function newState(){
 function makeFeed(){return feedMode==="synthetic"?new SyntheticFeed():new CoinbaseFeed("BTC-USD")}
 function shortRun(id){return id?String(id).slice(0,8):"—"}
 function fmtNet(v){const n=Number(v);return Number.isFinite(n)?(n>=0?"+":"")+"$"+n.toFixed(4):"—"}
+
+function renderSessionControl(){
+  if(!autonomous)return;
+  const remaining=Math.max(0,sessionUntil-Date.now());
+  const active=remaining>0;
+  const mins=Math.floor(remaining/60000),secs=Math.floor((remaining%60000)/1000);
+  el("run20").hidden=active;
+  el("stopRun").hidden=!active;
+  if(active){
+    el("stopRun").textContent="STOP · "+String(mins).padStart(2,"0")+":"+String(secs).padStart(2,"0");
+    document.querySelector(".mode").textContent="NEON PAPER · RUNNING";
+  }else{
+    el("run20").textContent="RUN 20 MIN";
+    document.querySelector(".mode").textContent="NEON PAPER · IDLE";
+  }
+}
+async function refreshControlStatus(){
+  if(!autonomous||!controlBase)return;
+  try{
+    const res=await fetch(controlBase+"/status",{cache:"no-store"});
+    if(res.ok){
+      const data=await res.json();
+      sessionUntil=data.active&&data.run_until?Date.parse(data.run_until):0;
+      renderSessionControl();
+    }
+  }catch{}
+  clearTimeout(controlPollTimer);
+  controlPollTimer=setTimeout(refreshControlStatus,5000);
+}
+async function setSession(action){
+  if(!autonomous||!controlBase)return;
+  const button=action==="start"?el("run20"):el("stopRun");
+  button.disabled=true;
+  try{
+    const res=await fetch(controlBase+"/"+action,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    const data=await res.json();
+    sessionUntil=data.active&&data.run_until?Date.parse(data.run_until):0;
+    renderSessionControl();
+    addEvent("sys","SYSTEM",action==="start"?"20-minute Neon session armed":"Neon session stopped");
+  }catch(e){
+    addEvent("sell","CONTROL","Timer control failed · "+e.message);
+  }finally{
+    button.disabled=false;
+  }
+}
 async function refreshLedger(){
   if(!ledgerEndpoint)return;
   try{
@@ -193,12 +240,15 @@ function onFeedStatus(status,detail){
   }
 }
 async function boot(){
-  clearTimeout(strategyTimer);clearTimeout(syntheticTimer);clearTimeout(ledgerTimer);cancelAnimationFrame(rafId);
+  clearTimeout(strategyTimer);clearTimeout(syntheticTimer);clearTimeout(ledgerTimer);clearTimeout(controlPollTimer);clearInterval(controlClockTimer);cancelAnimationFrame(rafId);
   try{feed?.close?.()}catch{} if(log)log.close();
   feed=makeFeed();log=new EvidenceLog({endpoint:null});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
   el("feed").innerHTML="";document.querySelector(".mode").textContent=autonomous?"NEON PAPER":feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
   el("shock").disabled=feedMode==="live";el("shock").title=feedMode==="live"?"Shock injection is available only in deterministic synthetic mode.":"";
   el("speed").disabled=feedMode==="live";el("speed").textContent=feedMode==="live"?"STREAMING":"1× SPEED";
+  el("run20").hidden=!autonomous;el("stopRun").hidden=true;
+  if(autonomous){el("pause").hidden=true;el("speed").hidden=true;el("shock").hidden=true;el("reset").textContent="REFRESH"}
+  else{el("run20").hidden=true;el("stopRun").hidden=true}
   addEvent("sys","SYSTEM",autonomous?"Opening Coinbase visualization · Neon owns paper execution":feedMode==="live"?"Opening Coinbase BTC-USD WebSocket":"Deterministic arena initialized");
   await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD",market_transport:feedMode==="live"?"coinbase-websocket":"synthetic",strategy:strategy.manifest},0);
   if(feedMode==="live"){
@@ -208,7 +258,7 @@ async function boot(){
   }else{
     syntheticTimer=setTimeout(syntheticPulse,20);
   }
-  renderSlow();refreshLedger();loadHistoryPlane();rafId=requestAnimationFrame(frame);
+  renderSlow();refreshLedger();loadHistoryPlane();if(autonomous){refreshControlStatus();controlClockTimer=setInterval(renderSessionControl,1000)}rafId=requestAnimationFrame(frame);
 }
 async function strategyPulse(){
   if(feedMode!=="live")return;
@@ -397,6 +447,8 @@ el("pause").onclick=()=>{
 };
 el("speed").onclick=()=>{if(feedMode!=="synthetic")return;speed=speed===1?2:speed===2?4:1;el("speed").textContent=speed+"× SPEED"};
 el("shock").onclick=()=>{if(feedMode!=="synthetic")return;const shock=feed.shock();addEvent("sys","SHOCK",(shock>0?"+":"")+(shock*100).toFixed(2)+"% event queued")};
+el("run20").onclick=()=>setSession("start");
+el("stopRun").onclick=()=>setSession("stop");
 el("reset").onclick=boot;
 window.addEventListener("resize",()=>{state.depthDirty=true;drawTournamentChart()});
 window.addEventListener("pagehide",()=>{try{feed?.close?.();log?.close?.()}catch{}},{once:true});
