@@ -7,6 +7,8 @@ import {EvidenceLog} from "./evidence.js";
 const el=id=>document.getElementById(id);
 const feedMode=new URLSearchParams(location.search).get("feed")==="synthetic"?"synthetic":"live";
 const evidenceEndpoint=document.querySelector('meta[name="survival-evidence-endpoint"]')?.content||null;
+const executionMode=document.querySelector('meta[name="survival-execution-mode"]')?.content||"browser";
+const autonomous=executionMode==="neon"&&feedMode==="live";
 const ledgerEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/ledger")||null;
 const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history")||null;
 const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
@@ -33,6 +35,12 @@ async function refreshLedger(){
     const res=await fetch(ledgerEndpoint,{cache:"no-store"});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
+    if(autonomous&&data.runner_state?.account){
+      state.account={...createAccount(),...data.runner_state.account};
+      const remoteTick=Number(data.runner_state.tick);
+      if(Number.isInteger(remoteTick)&&remoteTick>=0)state.tick=remoteTick;
+      state.slowDirty=true;
+    }
     const runs=(data.runs||[]).slice(0,8);
     const events=(data.events||[]).slice(0,12);
     el("neonRuns").innerHTML='<div class="neonRow"><b>RUN</b><b>STRATEGY</b><b>TICKS</b><b>FILLS</b><b>NET</b></div>'+
@@ -131,11 +139,11 @@ function onFeedStatus(status,detail){
 async function boot(){
   clearTimeout(strategyTimer);clearTimeout(syntheticTimer);clearTimeout(ledgerTimer);cancelAnimationFrame(rafId);
   try{feed?.close?.()}catch{} if(log)log.close();
-  feed=makeFeed();log=new EvidenceLog({endpoint:evidenceEndpoint});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
-  el("feed").innerHTML="";document.querySelector(".mode").textContent=feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
+  feed=makeFeed();log=new EvidenceLog({endpoint:autonomous?null:evidenceEndpoint});strategy=createStrategy("consensus-six");state=newState();started=Date.now();
+  el("feed").innerHTML="";document.querySelector(".mode").textContent=autonomous?"NEON PAPER":feedMode==="live"?"LIVE PAPER":"SYNTHETIC TEST";
   el("shock").disabled=feedMode==="live";el("shock").title=feedMode==="live"?"Shock injection is available only in deterministic synthetic mode.":"";
   el("speed").disabled=feedMode==="live";el("speed").textContent=feedMode==="live"?"STREAMING":"1× SPEED";
-  addEvent("sys","SYSTEM",feedMode==="live"?"Opening Coinbase BTC-USD WebSocket":"Deterministic arena initialized");
+  addEvent("sys","SYSTEM",autonomous?"Opening Coinbase visualization · Neon owns paper execution":feedMode==="live"?"Opening Coinbase BTC-USD WebSocket":"Deterministic arena initialized");
   await log.append("run.started",{mode:feedMode,config:DEFAULT_CONFIG,product:"BTC-USD",market_transport:feedMode==="live"?"coinbase-websocket":"synthetic",strategy:strategy.manifest},0);
   if(feedMode==="live"){
     feed.start(acceptVisualQuote,onFeedStatus);
@@ -161,7 +169,8 @@ async function strategyPulse(){
           }
         }else if(quote.sequence!==state.lastStrategySequence){
           state.lastStrategySequence=quote.sequence;
-          await processSnapshot(quote);
+          if(autonomous)previewSnapshot(quote);
+          else await processSnapshot(quote);
         }
       }
     }
@@ -187,6 +196,15 @@ async function syntheticPulse(){
   }
   syntheticTimer=setTimeout(syntheticPulse,SYNTHETIC_MS);
 }
+function previewSnapshot(quote){
+  const observation={...quote};
+  state.history.push(observation);if(state.history.length>90)state.history.shift();
+  strategy.observe(observation);
+  const target=strategy.target();
+  state.signals=target.explanation?.signals||[];
+  state.slowDirty=true;
+}
+
 async function processSnapshot(quote){
   state.tick++;
   const observation={...quote};

@@ -62,6 +62,14 @@ Current datasets:
 
 `tsmom-12m` consumes the futures dataset through a dedicated adapter. The adapter forms month-end futures returns and estimates ex-ante annualized volatility from exponentially weighted daily returns with a 60-day center of mass before passing 12 monthly observations to the cartridge. It is a replay/research contestant; Consensus Six remains the live paper executor.
 
+## Autonomous paper runner
+
+Production live-paper execution is owned by Neon, not by the browser. `neon.ts` declares a scheduled `trader` Function that fires every minute. Each invocation opens the Coinbase BTC-USD ticker for an 18-second window, samples at approximately 1 Hz, runs the existing `consensus-six` cartridge through the common risk/execution gate, and atomically persists evidence plus the resumable account/position/history snapshot into `survival_events`. An advisory lock and `scheduled_at` idempotency check prevent overlapping or replayed invocations from double-executing.
+
+`trader.mcc0nnell.org` remains the Cloudflare-hosted viewer and live market visualization. In production live mode it reads the authoritative account state from the Neon-backed ledger and does not execute paper orders locally. `?feed=synthetic` remains a browser-local deterministic executor for regression and shock testing. The default duty cycle can be tuned with `TRADER_WINDOW_MS` and `TRADER_SAMPLE_MS`.
+
+Deploy the Neon runtime and schedule from the linked project with `npm run deploy:neon`.
+
 ## Evidence
 
 Every strategy-sampled market observation, cartridge target, risk decision, fill, run boundary, and feed error enters a SHA-256 hash chain. Evidence is buffered in the browser and normally flushed to Neon every 5 seconds, or earlier if the queue reaches 25 records.

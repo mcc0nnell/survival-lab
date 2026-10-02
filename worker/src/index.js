@@ -44,7 +44,18 @@ async function readLedger(sql){
     FROM public.survival_events
     ORDER BY received_at DESC,run_id DESC,sequence DESC LIMIT 30
   `;
-  return {ok:true,generated_at:new Date().toISOString(),runs,events};
+  const runnerStates=await sql`
+    SELECT run_id::text,occurred_at,
+      (payload->'data'->'state'->>'tick')::int AS tick,
+      (payload->'data'->>'samples')::int AS samples,
+      payload->'data'->>'scheduled_at' AS scheduled_at,
+      payload->'data'->'state'->'account' AS account
+    FROM public.survival_events
+    WHERE payload->>'event_type'='runner.state'
+      AND payload->'data'->>'runner'='neon-scheduled'
+    ORDER BY occurred_at DESC,received_at DESC LIMIT 1
+  `;
+  return {ok:true,generated_at:new Date().toISOString(),runs,events,runner_state:runnerStates[0]||null};
 }
 
 async function insertHistory(sql,rows){
