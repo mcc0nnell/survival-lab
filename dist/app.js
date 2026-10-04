@@ -224,7 +224,7 @@ async function loadHistoryPlane(){
     shadowData=runDonchianForwardShadow({
       spotDataset:historyDataset,costBps:DEFAULT_CONFIG.feeBps+DEFAULT_CONFIG.slippageBps
     });
-    el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" · FUTURES "+futuresDataset.count+" · THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
+    el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" THROUGH "+(historyDataset.coverage_end?.slice(0,10)||"—")+" · FUTURES "+futuresDataset.count+" THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
     renderTournament();renderShadow();
     await Promise.all([recordHistorySnapshot(historyDataset),recordHistorySnapshot(futuresDataset)]);
   }catch(e){
