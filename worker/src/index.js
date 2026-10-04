@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import {closedDailyCutoffIso,isClosedDailyBar,utcDayStartMs} from "./history-time.js";
 
 const HISTORY_PRODUCTS=new Set(["BTC-USD","PF_XBTUSD"]);
 const SESSION_KEY="paper-session";
@@ -160,8 +161,10 @@ async function refreshKrakenDaily(sql,product){
     if(!Array.isArray(c)||c.length<7)continue;
     const time=Number(c[0]),open=Number(c[1]),high=Number(c[2]),low=Number(c[3]),close=Number(c[4]),volume=Number(c[6]);
     if(!Number.isFinite(time)||![open,high,low,close,volume].every(Number.isFinite))continue;
+    const observedAt=new Date(time*1000).toISOString();
+    if(!isClosedDailyBar(observedAt))continue;
     rows.push({provider:"kraken-spot",product,cadence:"1d",
-      observed_at:new Date(time*1000).toISOString(),open,high,low,close,volume});
+      observed_at:observedAt,open,high,low,close,volume});
   }
   await insertHistory(sql,rows);
   return rows.length;
@@ -179,8 +182,10 @@ async function refreshKrakenFuturesDaily(sql,product,days){
   for(const c of body?.candles||[]){
     const time=Number(c.time),open=Number(c.open),high=Number(c.high),low=Number(c.low),close=Number(c.close),volume=Number(c.volume);
     if(!Number.isFinite(time)||![open,high,low,close,volume].every(Number.isFinite))continue;
+    const observedAt=new Date(time).toISOString();
+    if(!isClosedDailyBar(observedAt))continue;
     rows.push({provider:"kraken-futures",product,cadence:"1d",
-      observed_at:new Date(time).toISOString(),open,high,low,close,volume});
+      observed_at:observedAt,open,high,low,close,volume});
   }
   await insertHistory(sql,rows);
   return rows.length;
@@ -191,11 +196,13 @@ function historyProvider(product){return product==="PF_XBTUSD"?"kraken-futures":
 async function readHistory(sql,product,days){
   const provider=historyProvider(product);
   const cutoff=new Date(Date.now()-days*86400000).toISOString();
+  const closedBefore=closedDailyCutoffIso();
   return sql`
     SELECT provider,product,cadence,observed_at,open,high,low,close,volume
     FROM public.market_history
     WHERE provider=${provider} AND product=${product}
       AND cadence='1d' AND observed_at>=${cutoff}::timestamptz
+      AND observed_at<${closedBefore}::timestamptz
     ORDER BY observed_at ASC
   `;
 }
@@ -204,7 +211,8 @@ async function historyPayload(sql,product,days){
   const provider=historyProvider(product);
   let rows=await readHistory(sql,product,days);
   const latest=rows.length?new Date(rows[rows.length-1].observed_at).getTime():0;
-  const stale=Date.now()-latest>36*3600000;
+  const expectedLatest=utcDayStartMs()-86400000;
+  const stale=latest<expectedLatest;
   if(rows.length<Math.max(20,days-5)||stale){
     if(product==="PF_XBTUSD")await refreshKrakenFuturesDaily(sql,product,days+5);
     else await refreshKrakenDaily(sql,product);
