@@ -75,6 +75,12 @@ Current datasets:
 
 `tsmom-12m` consumes the futures dataset through a dedicated adapter. The adapter forms month-end futures returns and estimates ex-ante annualized volatility from exponentially weighted daily returns with a 60-day center of mass before passing 12 monthly observations to the cartridge. It is a replay/research contestant; Consensus Six remains the live paper executor.
 
+## Coinbase authenticated boundary
+
+Trader can authenticate to Coinbase Advanced Trade with a CDP API key supplied only through the Neon Function environment as `COINBASE_API_KEY` and `COINBASE_API_SECRET`. Raw base64 Ed25519 keys and existing ECDSA PEM keys are supported. The authenticated boundary currently exposes only a protected read-only account probe; **order execution remains paper-only**. The key is never shipped to the browser, Cloudflare static assets, Neon evidence payloads, or repository content.
+
+Run `npm run smoke:coinbase` with the two environment variables present to verify authentication without placing an order.
+
 ## Autonomous paper runner
 
 Production live-paper execution is owned by Neon, not by the browser, and is idle by default. The production UI exposes a bounded `RUN 15 MIN` lease. Starting a lease stores only timer state in Cloudflare KV and dispatches the Neon `trader` Function immediately, then once per minute while the lease remains active. Each tick opens the Coinbase BTC-USD ticker for a 55-second window, samples at approximately 1 Hz, runs the existing `consensus-six` cartridge through the common risk/execution gate, and atomically persists evidence plus the resumable account/position/history snapshot into `survival_events`. An advisory lock and `scheduled_at` idempotency check prevent overlapping or replayed invocations from double-executing. When the lease expires or STOP is pressed, no further Neon ticks are dispatched.
