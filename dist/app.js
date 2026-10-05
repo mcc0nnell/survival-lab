@@ -4,6 +4,7 @@ import {HistoryPlane,compatibility,bootstrapStrategy} from "./history.js";
 import {runHistoricalTournament,runDonchianForwardShadow,DONCHIAN_SHADOW_START} from "./backtest.js";
 import {CoinbaseFeed,SyntheticFeed} from "./feed.js";
 import {EvidenceLog} from "./evidence.js";
+import {buildReplayModel,replaySnapshot} from "./replay.js";
 
 const el=id=>document.getElementById(id);
 const feedMode=new URLSearchParams(location.search).get("feed")==="synthetic"?"synthetic":"live";
@@ -14,9 +15,9 @@ const ledgerEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/ledger")|
 const controlBase=evidenceEndpoint?.replace(/\/api\/events$/, "/api/control")||null;
 const historyEndpoint=evidenceEndpoint?.replace(/\/api\/events$/, "/api/history")||null;
 const historyPlane=new HistoryPlane({endpoint:historyEndpoint});
-const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100;
+const STRATEGY_MS=1000, SYNTHETIC_MS=900, VISUAL_SAMPLE_MS=80, DEPTH_RENDER_MS=100, REPLAY_DURATION_MS=30000, REPLAY_WINDOW=70;
 const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,controlPollTimer,controlClockTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null,shadowData=null,sessionUntil=0;
+let feed,log,state,strategy,strategyTimer,syntheticTimer,ledgerTimer,controlPollTimer,controlClockTimer,rafId,started,speed=1,nextStrategyAt=0,historyDataset=null,futuresDataset=null,tournamentData=null,shadowData=null,sessionUntil=0,replayModel=null,replayIndex=0,replayPlaying=false,replayStartAt=0,replayStartIndex=0,replaySelectedId="donchian-45-10";
 const strategyPreviews=new Map();
 
 function newState(){
@@ -195,6 +196,125 @@ function renderShadow(){
       '<span>'+fmtSharpe(r.sharpe)+'</span><span>'+r.turnover.toFixed(1)+'×</span><span>'+r.observations+'</span></div>').join("");
 }
 
+
+const REPLAY_COLORS=["#70ff9f","#67d9ff","#ffbf69","#ff7096","#b38cff","#8fe0c0"];
+
+function clearReplay(message="Waiting for history."){
+  replayModel=null;replayIndex=0;replayPlaying=false;
+  const select=el("replayStrategy"),play=el("replayPlay"),pause=el("replayPause"),scrub=el("replayScrub");
+  if(select){select.disabled=true;select.innerHTML="<option>WAITING FOR HISTORY</option>"}
+  if(play)play.disabled=true;
+  if(pause){pause.disabled=true;pause.textContent="PAUSE"}
+  if(scrub){scrub.max="0";scrub.value="0"}
+  if(el("replayRace"))el("replayRace").innerHTML='<div class="tournamentEmpty">'+message+'</div>';
+  if(el("replayDate"))el("replayDate").textContent="DATE —";
+  if(el("replayEquity"))el("replayEquity").textContent="EQUITY —";
+  if(el("replayReturn"))el("replayReturn").textContent="RETURN —";
+  if(el("replayDd"))el("replayDd").textContent="DRAWDOWN —";
+  if(el("replayFrame"))el("replayFrame").textContent="0 / 0";
+}
+
+function setupReplay(){
+  replayModel=buildReplayModel({spotDataset:historyDataset,tournamentData});
+  if(!replayModel.frames.length||!replayModel.results.length){clearReplay("No aligned replay window.");return}
+  const select=el("replayStrategy");
+  select.innerHTML=replayModel.results.map(r=>'<option value="'+r.id+'">'+r.name+'</option>').join("");
+  if(!replayModel.results.some(r=>r.id===replaySelectedId))replaySelectedId=replayModel.results[0].id;
+  select.value=replaySelectedId;select.disabled=false;
+  el("replayPlay").disabled=false;el("replayPause").disabled=false;
+  const scrub=el("replayScrub");scrub.max=String(replayModel.frames.length-1);scrub.value="0";
+  el("replayFrom").textContent=replayModel.start_at?.slice(0,10)||"—";
+  el("replayTo").textContent=replayModel.end_at?.slice(0,10)||"—";
+  replayIndex=0;replayPlaying=false;el("replayPause").textContent="PAUSE";
+  renderReplay();
+}
+
+function replayEquityAt(id,index=replayIndex){
+  return Number(replayModel?.frames?.[index]?.equities?.[id]);
+}
+function replayDrawdownAt(id,index=replayIndex){
+  if(!replayModel?.frames?.length)return 0;
+  let peak=1,current=1,maxdd=0;
+  for(let i=0;i<=Math.min(index,replayModel.frames.length-1);i++){
+    const eq=replayEquityAt(id,i);
+    if(!Number.isFinite(eq))continue;
+    current=eq;peak=Math.max(peak,eq);if(peak>0)maxdd=Math.max(maxdd,(peak-eq)/peak);
+  }
+  return {current,drawdown:peak>0?(peak-current)/peak:0,maxdd};
+}
+function renderReplay(){
+  const snap=replaySnapshot(replayModel,replayIndex);if(!snap)return;
+  replayIndex=snap.index;
+  const eq=Number(snap.frame.equities?.[replaySelectedId]);
+  const dd=replayDrawdownAt(replaySelectedId,replayIndex);
+  el("replayDate").textContent="DATE "+String(snap.frame.at).slice(0,10);
+  el("replayEquity").textContent="EQUITY $"+(DEFAULT_CONFIG.initialEquity*(Number.isFinite(eq)?eq:1)).toFixed(2);
+  el("replayReturn").textContent="RETURN "+fmtPct((Number.isFinite(eq)?eq:1)-1);
+  el("replayDd").textContent="DRAWDOWN "+fmtPct(-dd.drawdown).replace("-","");
+  el("replayFrame").textContent=(replayIndex+1)+" / "+snap.total;
+  el("replayScrub").value=String(replayIndex);
+
+  const entries=replayModel.results.map((r,i)=>({r,i,eq:Number(snap.frame.equities?.[r.id])||1}))
+    .sort((a,b)=>b.eq-a.eq);
+  const maxAbs=Math.max(.0001,...entries.map(x=>Math.abs(x.eq-1)));
+  el("replayRace").innerHTML=entries.map(({r,i,eq})=>{
+    const ret=eq-1,width=8+92*Math.min(1,Math.abs(ret)/maxAbs);
+    return '<div class="raceRow"><span class="raceName">'+r.name+'</span><span class="raceTrack"><i style="--race-color:'+REPLAY_COLORS[i%REPLAY_COLORS.length]+';width:'+width.toFixed(1)+'%"></i></span><span class="raceValue '+(ret>=0?"pos":"neg")+'">'+fmtPct(ret)+'</span></div>';
+  }).join("");
+  requestAnimationFrame(drawReplayChart);
+}
+function drawReplayChart(){
+  const c=el("replayChart");if(!c||!replayModel?.frames?.length)return;
+  const dpr=Math.min(devicePixelRatio||1,2),w=c.clientWidth,h=c.clientHeight;
+  const pw=Math.max(1,Math.round(w*dpr)),ph=Math.max(1,Math.round(h*dpr));
+  if(c.width!==pw||c.height!==ph){c.width=pw;c.height=ph}
+  const x=c.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+  const start=Math.max(0,replayIndex-REPLAY_WINDOW+1),frames=replayModel.frames.slice(start,replayIndex+1);
+  if(!frames.length)return;
+  const left=12,right=w-10,top=12,priceBottom=Math.max(90,h*.67),equityTop=priceBottom+20,equityBottom=h-14;
+  x.strokeStyle="#172026";x.lineWidth=1;
+  for(let i=0;i<4;i++){const y=top+i*(priceBottom-top)/3;x.beginPath();x.moveTo(left,y);x.lineTo(right,y);x.stroke()}
+  x.beginPath();x.moveTo(left,equityTop-9);x.lineTo(right,equityTop-9);x.stroke();
+  const lows=frames.map(f=>f.low),highs=frames.map(f=>f.high),minP=Math.min(...lows),maxP=Math.max(...highs),spanP=maxP-minP||1;
+  const slot=(right-left)/Math.max(1,frames.length),body=Math.max(1,Math.min(7,slot*.62));
+  frames.forEach((f,i)=>{
+    const px=left+(i+.5)*slot,y=v=>top+(maxP-v)/spanP*(priceBottom-top);
+    const up=f.close>=f.open;x.strokeStyle=up?"#70ff9f":"#ff5b68";x.fillStyle=x.strokeStyle;x.lineWidth=1;
+    x.beginPath();x.moveTo(px,y(f.high));x.lineTo(px,y(f.low));x.stroke();
+    const y1=y(f.open),y2=y(f.close),bh=Math.max(1,Math.abs(y2-y1));
+    x.fillRect(px-body/2,Math.min(y1,y2),body,bh);
+  });
+  const equities=frames.map(f=>Number(f.equities?.[replaySelectedId])||1),minE=Math.min(...equities),maxE=Math.max(...equities),spanE=maxE-minE||1;
+  x.strokeStyle="#67d9ff";x.lineWidth=2;x.beginPath();
+  equities.forEach((v,i)=>{
+    const px=left+(i+.5)*slot,py=equityTop+(maxE-v)/spanE*(equityBottom-equityTop);
+    i?x.lineTo(px,py):x.moveTo(px,py);
+  });
+  x.stroke();
+  x.fillStyle="#657177";x.font="8px ui-monospace, SFMono-Regular, Menlo, monospace";
+  x.fillText("BTC-USD DAILY",left,top+8);x.fillText("SELECTED EQUITY",left,equityTop+8);
+}
+function startReplay(reset=true){
+  if(!replayModel?.frames?.length)return;
+  if(reset||replayIndex>=replayModel.frames.length-1)replayIndex=0;
+  replayStartIndex=replayIndex;replayStartAt=performance.now();replayPlaying=true;
+  el("replayPause").textContent="PAUSE";renderReplay();
+}
+function toggleReplayPause(){
+  if(!replayModel?.frames?.length)return;
+  if(replayPlaying){replayPlaying=false;el("replayPause").textContent="RESUME";return}
+  replayStartIndex=replayIndex;replayStartAt=performance.now();replayPlaying=true;el("replayPause").textContent="PAUSE";
+}
+function updateReplayPlayback(ts){
+  if(!replayPlaying||!replayModel?.frames?.length)return;
+  const last=replayModel.frames.length-1,remaining=Math.max(1,last-replayStartIndex);
+  const duration=Math.max(250,REPLAY_DURATION_MS*(remaining/Math.max(1,last)));
+  const progress=Math.min(1,(ts-replayStartAt)/duration);
+  const next=Math.min(last,replayStartIndex+Math.floor(progress*remaining));
+  if(next!==replayIndex){replayIndex=next;renderReplay()}
+  if(progress>=1){replayIndex=last;replayPlaying=false;el("replayPause").textContent="RESUME";renderReplay()}
+}
+
 async function recordHistorySnapshot(dataset){
   await log?.append("history.snapshot",{
     dataset_id:dataset.id,provider:dataset.provider,product:dataset.product,
@@ -225,10 +345,10 @@ async function loadHistoryPlane(){
       spotDataset:historyDataset,costBps:DEFAULT_CONFIG.feeBps+DEFAULT_CONFIG.slippageBps
     });
     el("historyState").textContent="HISTORY · NEON · SPOT "+historyDataset.count+" THROUGH "+(historyDataset.coverage_end?.slice(0,10)||"—")+" · FUTURES "+futuresDataset.count+" THROUGH "+(futuresDataset.coverage_end?.slice(0,10)||"—");
-    renderTournament();renderShadow();
+    renderTournament();renderShadow();setupReplay();
     await Promise.all([recordHistorySnapshot(historyDataset),recordHistorySnapshot(futuresDataset)]);
   }catch(e){
-    tournamentData=null;shadowData=null;
+    tournamentData=null;shadowData=null;clearReplay("Replay unavailable.");
     el("historyState").textContent="HISTORY · ERROR";
     el("tournamentState").textContent="TOURNAMENT · UNAVAILABLE";
     addEvent("sell","HISTORY",e.message);
@@ -448,6 +568,7 @@ function draw(){
 }
 function frame(ts){
   if(!state)return;
+  updateReplayPlayback(ts);
   const dt=state.lastFrameAt?Math.min(100,ts-state.lastFrameAt):16;state.lastFrameAt=ts;
   if(Number.isFinite(state.targetPrice)){
     if(state.displayPrice==null||reducedMotion)state.displayPrice=state.targetPrice;
@@ -469,9 +590,13 @@ el("pause").onclick=()=>{
 };
 el("speed").onclick=()=>{if(feedMode!=="synthetic")return;speed=speed===1?2:speed===2?4:1;el("speed").textContent=speed+"× SPEED"};
 el("shock").onclick=()=>{if(feedMode!=="synthetic")return;const shock=feed.shock();addEvent("sys","SHOCK",(shock>0?"+":"")+(shock*100).toFixed(2)+"% event queued")};
+el("replayPlay").onclick=()=>startReplay(true);
+el("replayPause").onclick=toggleReplayPause;
+el("replayStrategy").onchange=e=>{replaySelectedId=e.target.value;renderReplay()};
+el("replayScrub").oninput=e=>{replayPlaying=false;el("replayPause").textContent="RESUME";replayIndex=Number(e.target.value)||0;renderReplay()};
 el("run20").onclick=()=>setSession("start");
 el("stopRun").onclick=()=>setSession("stop");
 el("reset").onclick=boot;
-window.addEventListener("resize",()=>{state.depthDirty=true;drawTournamentChart()});
+window.addEventListener("resize",()=>{state.depthDirty=true;drawTournamentChart();drawReplayChart()});
 window.addEventListener("pagehide",()=>{try{feed?.close?.();log?.close?.()}catch{}},{once:true});
 boot();
