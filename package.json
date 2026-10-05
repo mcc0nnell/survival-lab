@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "race:compounders": "node scripts/compounder-race.mjs",
     "smoke:live": "node scripts/live-smoke.mjs",
     "deploy:trader": "npx wrangler deploy dist --name survival-lab-trader --domain trader.mcc0nnell.org --compatibility-date 2026-09-30",
     "deploy:evidence": "cd worker && npx wrangler deploy",

@@ -49,6 +49,12 @@ The dashboard reports normalized equity curves, total return, maximum drawdown, 
 
 The dashboard also exposes a **Night Replay** view. It compresses the aligned one-year spot tournament window into a 30-second playback over completed Neon-backed daily candles, overlays the selected cartridge's normalized equity, and races the spot cartridges side by side. The replay consumes the existing history/tournament outputs only; it does not create orders or imply live capital.
 
+### Replay compounders
+
+Replay can optionally pass a cartridge target through a portfolio-sizing compounder before the common friction model. Compounders never receive live execution authority and never change the underlying strategy signal. The current research race includes fixed-fractional sizing, realized-volatility targeting, fractional Kelly sizing, and a drawdown-throttled/no-trade-band hybrid, all capped inside the existing normalized `[-1, 1]` exposure boundary. Replay metrics include annualized geometric return and Calmar ratio in addition to total return, drawdown, Sharpe, and turnover.
+
+Run `npm run race:compounders` to load the current completed BTC-USD daily history through the existing evidence/history plane and compare the sizing policies against an unchanged raw-exposure control at the same 21.5 bps turnover friction assumption.
+
 ### Donchian forward shadow
 
 The 45/10 candidate is frozen after the October 2, 2026 selection decision and is tracked against the unchanged 55/20 control beginning with the October 3 UTC daily bar. History before the freeze is warmup only. The forward-shadow panel therefore starts at zero and changes only as genuinely new daily bars arrive; no later parameter sweep rewrites that start date.

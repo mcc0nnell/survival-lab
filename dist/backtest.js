@@ -1,5 +1,6 @@
 import {dailyOhlcvObservations,aggregateMonthly,ewmaAnnualizedVol} from "./history.js";
 import {createBuyHold,createSmaCross,createDonchian,createDonchian4510,createRsiReversion,createTimeSeriesMomentum} from "./strategies.js";
+import {createDefaultCompounders} from "./compounder.js";
 
 const mean=xs=>xs.length?xs.reduce((s,x)=>s+x,0)/xs.length:0;
 
@@ -9,8 +10,9 @@ function stdev(xs){
   return Math.sqrt(xs.reduce((s,x)=>s+(x-m)*(x-m),0)/(xs.length-1));
 }
 
-function finalize({id,name,dataset,curve,periodReturns,turnover,annualPeriods,benchmarkId}){
-  const totalReturn=(curve.at(-1)?.equity??1)-1;
+function finalize({id,name,dataset,curve,periodReturns,turnover,annualPeriods,benchmarkId,compounderId=null,compounderConfig=null}){
+  const terminalEquity=curve.at(-1)?.equity??1;
+  const totalReturn=terminalEquity-1;
   let peak=1,maxDrawdown=0;
   for(const point of curve){
     peak=Math.max(peak,point.equity);
@@ -18,16 +20,19 @@ function finalize({id,name,dataset,curve,periodReturns,turnover,annualPeriods,be
   }
   const sd=stdev(periodReturns);
   const sharpe=sd>0?mean(periodReturns)/sd*Math.sqrt(annualPeriods):null;
-  return {id,name,dataset,total_return:totalReturn,max_drawdown:maxDrawdown,
-    sharpe:Number.isFinite(sharpe)?sharpe:null,turnover,observations:periodReturns.length,
-    benchmark_id:benchmarkId,curve};
+  const years=periodReturns.length/annualPeriods;
+  const annualizedReturn=years>0&&terminalEquity>0?Math.pow(terminalEquity,1/years)-1:null;
+  const calmar=maxDrawdown>0&&Number.isFinite(annualizedReturn)?annualizedReturn/maxDrawdown:null;
+  return {id,name,dataset,total_return:totalReturn,annualized_return:annualizedReturn,max_drawdown:maxDrawdown,
+    sharpe:Number.isFinite(sharpe)?sharpe:null,calmar:Number.isFinite(calmar)?calmar:null,turnover,observations:periodReturns.length,
+    benchmark_id:benchmarkId,compounder_id:compounderId,compounder_config:compounderConfig,curve};
 }
 
 function sortedDaily(dataset){
   return dailyOhlcvObservations(dataset?.observations||[]).sort((a,b)=>a.receivedAt-b.receivedAt);
 }
 
-export function runDailyReplay({id,name,create,dataset,evaluationDays=365,startAt=null,costBps=21.5,benchmarkId="btc-buy-hold"}){
+export function runDailyReplay({id,name,create,dataset,evaluationDays=365,startAt=null,costBps=21.5,benchmarkId="btc-buy-hold",compounder=null}){
   const rows=sortedDaily(dataset);
   if(rows.length<3)throw new Error(id+" needs daily history");
   let evalIndex;
@@ -38,32 +43,52 @@ export function runDailyReplay({id,name,create,dataset,evaluationDays=365,startA
     evalIndex=found<0?rows.length:Math.max(1,found);
   }else evalIndex=Math.max(1,rows.length-Math.max(2,evaluationDays));
   const strategy=create();
-  let exposure=0;
+  let rawExposure=0;
   for(let i=0;i<evalIndex;i++){
     strategy.observe(rows[i]);
-    exposure=Number(strategy.target().exposure)||0;
+    rawExposure=Number(strategy.target().exposure)||0;
   }
   let equity=1,turnover=0,previousClose=rows[evalIndex-1].close;
-  const curve=[{at:rows[evalIndex-1].observed_at,equity}],periodReturns=[];
+  compounder?.reset?.({equity});
+  let compounderState=compounder?.next?.({rawExposure,equity,previousExposure:0,initial:true})||null;
+  let exposure=compounderState?Number(compounderState.exposure):rawExposure;
+  if(!Number.isFinite(exposure)||exposure<-1||exposure>1)throw new RangeError((compounder?.id||id)+" emitted invalid compounded exposure");
+  const curve=[{at:rows[evalIndex-1].observed_at,equity,exposure,raw_exposure:rawExposure,compounder_scale:compounderState?.scale??1}],periodReturns=[];
   const costRate=Math.max(0,Number(costBps)||0)/10000;
   for(let i=evalIndex;i<rows.length;i++){
-    const observation=rows[i],startEquity=equity;
+    const observation=rows[i],startEquity=equity,priorRawExposure=rawExposure;
     const assetReturn=previousClose>0?observation.close/previousClose-1:0;
     equity*=Math.max(0,1+exposure*assetReturn);
     strategy.observe(observation);
-    const nextExposure=Number(strategy.target().exposure);
-    if(!Number.isFinite(nextExposure)||nextExposure<-1||nextExposure>1)throw new RangeError(id+" emitted invalid exposure");
+    const nextRawExposure=Number(strategy.target().exposure);
+    if(!Number.isFinite(nextRawExposure)||nextRawExposure<-1||nextRawExposure>1)throw new RangeError(id+" emitted invalid exposure");
+    compounderState=compounder?.next?.({
+      rawExposure:nextRawExposure,equity,previousExposure:exposure,assetReturn,
+      signalReturn:priorRawExposure*assetReturn
+    })||null;
+    const nextExposure=compounderState?Number(compounderState.exposure):nextRawExposure;
+    if(!Number.isFinite(nextExposure)||nextExposure<-1||nextExposure>1)throw new RangeError((compounder?.id||id)+" emitted invalid compounded exposure");
     const change=Math.abs(nextExposure-exposure);
     if(change){
       turnover+=change;
       equity*=Math.max(0,1-change*costRate);
     }
     periodReturns.push(startEquity>0?equity/startEquity-1:0);
-    curve.push({at:observation.observed_at,equity});
+    curve.push({at:observation.observed_at,equity,exposure:nextExposure,raw_exposure:nextRawExposure,compounder_scale:compounderState?.scale??1});
     exposure=nextExposure;
+    rawExposure=nextRawExposure;
     previousClose=observation.close;
   }
-  return finalize({id,name,dataset:dataset.id,curve,periodReturns,turnover,annualPeriods:365,benchmarkId});
+  return finalize({id,name,dataset:dataset.id,curve,periodReturns,turnover,annualPeriods:365,benchmarkId,
+    compounderId:compounder?.id||null,compounderConfig:compounder?.config||null});
+}
+
+export function runCompounderRace({id,name,create,dataset,evaluationDays=365,costBps=21.5,benchmarkId="btc-buy-hold",compounders=createDefaultCompounders()}){
+  const control=runDailyReplay({id,name,create,dataset,evaluationDays,costBps,benchmarkId});
+  const results=[control,...compounders.map(compounder=>runDailyReplay({
+    id,name,create,dataset,evaluationDays,costBps,benchmarkId,compounder
+  }))];
+  return {strategy_id:id,evaluation_days:evaluationDays,cost_bps:costBps,results};
 }
 
 function monthlyObservations(dataset){
