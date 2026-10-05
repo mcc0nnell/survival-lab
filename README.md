@@ -47,6 +47,8 @@ Trader runs the five replay cartridges side by side over a trailing 365-day eval
 
 The dashboard reports normalized equity curves, total return, maximum drawdown, annualized Sharpe, turnover, and return relative to a matched buy-and-hold benchmark. Spot cartridges compare with BTC-USD buy-and-hold; `tsmom-12m` compares with PF_XBTUSD buy-and-hold on the same month-end periods. Tournament results are historical diagnostics only and do not grant execution authority.
 
+The dashboard also exposes a **Night Replay** view. It compresses the aligned one-year spot tournament window into a 30-second playback over completed Neon-backed daily candles, overlays the selected cartridge's normalized equity, and races the spot cartridges side by side. The replay consumes the existing history/tournament outputs only; it does not create orders or imply live capital.
+
 ### Donchian forward shadow
 
 The 45/10 candidate is frozen after the October 2, 2026 selection decision and is tracked against the unchanged 55/20 control beginning with the October 3 UTC daily bar. History before the freeze is warmup only. The forward-shadow panel therefore starts at zero and changes only as genuinely new daily bars arrive; no later parameter sweep rewrites that start date.
