@@ -79,7 +79,7 @@ Current datasets:
 
 Trader can authenticate to Coinbase Advanced Trade with a CDP API key supplied only through the Neon Function environment as `COINBASE_API_KEY` and `COINBASE_API_SECRET`. Raw base64 Ed25519 keys and existing ECDSA PEM keys are supported. The authenticated boundary currently exposes only a protected read-only account probe; **order execution remains paper-only**. The key is never shipped to the browser, Cloudflare static assets, Neon evidence payloads, or repository content.
 
-Run `npm run smoke:coinbase` with the two environment variables present to verify authentication without placing an order.
+Run `npm run smoke:coinbase` with the two environment variables present to verify authentication without placing an order. The readiness check reads the USD available balance, `BTC-USD` product minimums/increments, the authenticated fee tier, and a Coinbase order preview. It then applies a fail-closed canary policy with a configurable bankroll ceiling, cash reserve, and minimum canary size. Previewing does not create an order.
 
 ## Autonomous paper runner
 

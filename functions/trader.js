@@ -13,7 +13,7 @@ import {
 } from "../dist/core.js";
 import { createStrategy } from "../dist/strategies.js";
 import { CoinbaseFeed } from "../dist/feed.js";
-import { coinbaseConfigured, probeCoinbase } from "./coinbase.js";
+import { coinbaseConfigured, probeCoinbase, inspectCoinbaseTrading } from "./coinbase.js";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 const RUNNER = "neon-scheduled";
@@ -403,6 +403,22 @@ export default {
       if(!coinbaseConfigured())return Response.json({ok:false,configured:false},{status:503});
       try{
         return Response.json({configured:true,...await probeCoinbase()});
+      }catch(error){
+        return Response.json({ok:false,configured:true,error:String(error?.message||error),status:error?.status||null},{status:502});
+      }
+    }
+    if (request.method === "GET" && url.pathname === "/coinbase/readiness") {
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/,"");
+      const expectedControlToken=controlToken();
+      if(!expectedControlToken||bearer!==expectedControlToken){
+        return Response.json({error:"unauthorized"},{status:403});
+      }
+      if(!coinbaseConfigured())return Response.json({ok:false,configured:false},{status:503});
+      try{
+        const bankrollCapUsd=Number(process.env.COINBASE_BANKROLL_CAP_USD||"10");
+        const reserveUsd=Number(process.env.COINBASE_RESERVE_USD||"1");
+        const minimumCanaryUsd=Number(process.env.COINBASE_MIN_CANARY_USD||"1");
+        return Response.json({configured:true,...await inspectCoinbaseTrading({bankrollCapUsd,reserveUsd,minimumCanaryUsd,preview:true})});
       }catch(error){
         return Response.json({ok:false,configured:true,error:String(error?.message||error),status:error?.status||null},{status:502});
       }
