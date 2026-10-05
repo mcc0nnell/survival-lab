@@ -13,6 +13,7 @@ import {
 } from "../dist/core.js";
 import { createStrategy } from "../dist/strategies.js";
 import { CoinbaseFeed } from "../dist/feed.js";
+import { coinbaseConfigured, probeCoinbase } from "./coinbase.js";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 const RUNNER = "neon-scheduled";
@@ -388,7 +389,23 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/healthz") {
-      return Response.json({ ok: true, runner: RUNNER, window_ms: WINDOW_MS, sample_ms: SAMPLE_MS });
+      return Response.json({
+        ok:true,runner:RUNNER,window_ms:WINDOW_MS,sample_ms:SAMPLE_MS,
+        coinbase:{configured:coinbaseConfigured(),execution:"paper-only"}
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/coinbase/probe") {
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/,"");
+      const expectedControlToken=controlToken();
+      if(!expectedControlToken||bearer!==expectedControlToken){
+        return Response.json({error:"unauthorized"},{status:403});
+      }
+      if(!coinbaseConfigured())return Response.json({ok:false,configured:false},{status:503});
+      try{
+        return Response.json({configured:true,...await probeCoinbase()});
+      }catch(error){
+        return Response.json({ok:false,configured:true,error:String(error?.message||error),status:error?.status||null},{status:502});
+      }
     }
     if (request.method !== "POST" || url.pathname !== "/") {
       return Response.json({ error: "not found" }, { status: 404 });
