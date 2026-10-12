@@ -127,3 +127,43 @@ The production frontend is a Cloudflare Worker static-assets deployment on `trad
 This is experimental evaluation software, not a broker. A future broker adapter belongs below the same risk gate and should consume explicit authorized intents rather than agent output directly.
 
 Apache-2.0
+
+## Neon daily research action
+
+Production (\`main\`) runs a **research-only** Neon Function Trigger named
+\`trader-daily-shadow\` at **02:15 UTC every day** (\`15 2 * * *\`), calling
+\`shadowdaily\` at \`/daily\`. It is independent of the on-demand Consensus Six
+15-minute paper-run lease and never calls the Coinbase authenticated boundary,
+opens positions, or places orders.
+
+Each delivery obtains completed Kraken BTC-USD daily history through the
+existing evidence Worker, verifies the previous UTC day is present, checks
+there are no gaps after the October 2 freeze, and runs the unchanged Donchian
+45/10 and 55/20 replay rules with the existing 21.5-bps friction assumption.
+A missing/stale candle fails the delivery rather than inventing a forward
+observation. Results are stored idempotently in the separate
+\`public.shadow_daily_results\` table, with the input-history SHA-256 and the
+observation date as evidence. The table definition is in \`schema.sql\`.
+
+Check current results in Neon:
+
+~~~sql
+SELECT as_of, strategy_id, observations,
+       ROUND((100 * total_return)::numeric, 2) AS return_pct,
+       ROUND((100 * max_drawdown)::numeric, 2) AS drawdown_pct,
+       computed_at
+FROM public.shadow_daily_results
+ORDER BY as_of DESC, strategy_id
+LIMIT 20;
+~~~
+
+\`neon.ts\` declares both the function and the native trigger. Deployment
+requires a \`SURVIVAL_DATABASE_URL\` for the production \`survival_lab\` database,
+not the branch-default \`ihb\` database. **Do not deploy the entire \`neon.ts\`
+without confirming the existing Trader function's separate Coinbase secrets;
+doing so may replace its environment.** A targeted \`shadowdaily\` deployment
+does not change the existing Trader function. The daily function receives only
+the Survival Lab database URL; it receives no exchange credentials. Validate
+changes with \`npm test\`, and review \`neon triggers list\` and the Neon function
+logs after each scheduled invocation. This schedule does not run continuously
+and has no real-money execution authority.

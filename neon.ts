@@ -21,7 +21,20 @@ export default defineConfig({
           COINBASE_API_SECRET:coinbaseApiSecret
         }:{})
       }
+    },
+    shadowdaily: {
+      name: "Daily Donchian Forward Shadow (research only)",
+      source: "./functions/shadowdaily.js",
+      env: { DATABASE_URL: survivalDatabaseUrl }
     }
   },
-  triggers: {}
+  triggers: {
+    "trader-daily-shadow": {
+      type: "schedule",
+      function: "shadowdaily",
+      cron: "15 2 * * *",
+      functionPath: "/daily",
+      enabled: true
+    }
+  }
 });
