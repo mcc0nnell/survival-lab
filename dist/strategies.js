@@ -1,5 +1,6 @@
 import {AGENTS,computeSignals,consensus} from "./core.js";
 import {createCartridge,validateManifest} from "./cartridge.js";
+import {KRONOS_SHADOW_MANIFEST} from "./kronos.js";
 
 const SPOT_DAILY_HISTORY=Object.freeze({dataset_id:"btc-usd-spot-1d",kind:"ohlcv",price_type:"spot",cadence:"1d",adapter:"daily-ohlcv-v1"});
 const mean=values=>values.reduce((sum,x)=>sum+x,0)/Math.max(1,values.length);
@@ -198,6 +199,7 @@ export const RESEARCH_CARTRIDGES=Object.freeze([
 ]);
 
 export const STRATEGY_REGISTRY=Object.freeze({
+  "kronos-small-shadow":Object.freeze({manifest:KRONOS_SHADOW_MANIFEST,create:null}),
   "consensus-six":Object.freeze({manifest:CONSENSUS_SIX_MANIFEST,create:createConsensusSix}),
   "tsmom-12m":Object.freeze({manifest:TSMOM_MANIFEST,create:createTimeSeriesMomentum}),
   "btc-buy-hold":Object.freeze({manifest:BUY_HOLD_MANIFEST,create:createBuyHold}),

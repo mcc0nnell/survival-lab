@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "dataset_id": "btc-usd-spot-1d",
+  "as_of": "2026-01-03T00:00:00.000Z",
+  "forecast_for": "2026-01-04T00:00:00.000Z",
+  "scenario_count": 8,
+  "seed": 123,
+  "bars": [
+    {"observed_at": "2026-01-01T00:00:00.000Z", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 2},
+    {"observed_at": "2026-01-02T00:00:00.000Z", "open": 101, "high": 103, "low": 100, "close": 102, "volume": 2},
+    {"observed_at": "2026-01-03T00:00:00.000Z", "open": 102, "high": 104, "low": 101, "close": 103, "volume": 2}
+  ]
+}
